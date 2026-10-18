@@ -1,4 +1,4 @@
-"""请求 / 响应模型 (v0.4)"""
+"""请求 / 响应模型 (v0.5)"""
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List
@@ -80,3 +80,34 @@ class DictionaryResult(BaseModel):
     phonetic_us: str = ""                # 美式音标
     api_meaning: str = ""                # 通用释义（中文，按词性分组）
     examples: List[ExampleItem] = []     # 双语例句 [{en, zh}]
+
+
+# ========== 记忆复习 ==========
+class ReviewAnswerIn(BaseModel):
+    result: str                          # remember / fuzzy / forget
+
+
+class ReviewAnswerOut(BaseModel):
+    word_id: int
+    review_stage: int                    # 自评后档位
+    next_review_at: datetime
+    last_reviewed_at: datetime
+
+
+class ReviewOverview(BaseModel):
+    due_today: int                       # 今日到期数
+    reviewed_today: int                  # 今日已复习数（按 distinct word_id）
+    total_in_queue: int                  # 复习队列总词条数
+
+
+class ReviewWordItem(WordResponse):
+    """到期词条 = 词条全量字段 + 复习状态"""
+    review_stage: int = 0
+    next_review_at: Optional[datetime] = None
+    last_reviewed_at: Optional[datetime] = None
+    review_count: int = 0
+
+
+class ReviewDueResponse(BaseModel):
+    total_due: int
+    items: List[ReviewWordItem]
