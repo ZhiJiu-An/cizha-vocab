@@ -1,0 +1,43 @@
+import axios from 'axios'
+
+const api = axios.create({
+  baseURL: '/api',
+  timeout: 15000,
+})
+
+// 统一把后端的 detail 错误信息抛出来，便于页面提示
+api.interceptors.response.use(
+  (resp) => resp,
+  (err) => {
+    const detail = err.response?.data?.detail
+    return Promise.reject(new Error(detail || err.message || '请求失败'))
+  },
+)
+
+/* ========= 词条 ========= */
+export const createWord = (data) => api.post('/words', data).then((r) => r.data)
+export const listWords = (params = {}) => api.get('/words', { params }).then((r) => r.data)
+export const getWord = (id) => api.get(`/words/${id}`).then((r) => r.data)
+export const updateWord = (id, data) => api.put(`/words/${id}`, data).then((r) => r.data)
+export const deleteWord = (id) => api.delete(`/words/${id}`).then((r) => r.data)
+export const listTags = () => api.get('/tags').then((r) => r.data)
+
+/* ========= 批量导入 / 导出 ========= */
+export const batchImport = (file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api
+    .post('/words/batch', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    .then((r) => r.data)
+}
+
+export const exportCsvUrl = (params = {}) => {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== '' && v != null),
+  ).toString()
+  return `/api/words/export${qs ? `?${qs}` : ''}`
+}
+
+/* ========= 词典自动补全 ========= */
+export const lookupDictionary = (word) =>
+  api.get(`/dictionary/${encodeURIComponent(word)}`).then((r) => r.data)

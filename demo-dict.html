@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DanCiJi - 词典搜索 Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --primary: #4f46e5;
+    --primary-2: #6366f1;
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --text: #1e293b;
+    --muted: #64748b;
+    --muted-2: #94a3b8;
+    --border: #e2e8f0;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-md: 0 4px 12px rgba(0,0,0,.08);
+  }
+  body {
+    font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  .app { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 200px; flex-shrink: 0;
+    background: linear-gradient(180deg, #4f46e5, #6366f1);
+    color: #fff; padding: 28px 0;
+  }
+  .sidebar .logo { font-size: 20px; font-weight: 700; padding: 0 24px 32px; letter-spacing: .5px; }
+  .sidebar a {
+    display: block; padding: 12px 24px; color: rgba(255,255,255,.8);
+    text-decoration: none; font-size: 14.5px; border-left: 3px solid transparent;
+    transition: all .2s; cursor: pointer;
+  }
+  .sidebar a:hover { background: rgba(255,255,255,.1); color: #fff; }
+  .sidebar a.active { background: rgba(255,255,255,.15); color: #fff; border-left-color: #fff; }
+  .sidebar a .ic { margin-right: 8px; }
+
+  .main { flex: 1; padding: 40px; overflow-y: auto; }
+
+  /* ===== 搜索区 ===== */
+  .search-hero { max-width: 860px; margin: 0 auto 32px; }
+  .search-hero .title {
+    text-align: center; font-size: 24px; font-weight: 700; margin-bottom: 20px;
+    background: linear-gradient(120deg, #4f46e5, #7c3aed);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .search-box {
+    display: flex; gap: 0; background: #fff; border-radius: 14px;
+    box-shadow: var(--shadow-md); overflow: hidden; border: 2px solid transparent;
+    transition: border-color .2s;
+  }
+  .search-box:focus-within { border-color: var(--primary-2); }
+  .search-box input {
+    flex: 1; padding: 16px 22px; border: none; font-size: 16px;
+    font-family: inherit; outline: none;
+  }
+  .search-box button {
+    padding: 0 28px; border: none; background: var(--primary); color: #fff;
+    font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit;
+    transition: background .2s;
+  }
+  .search-box button:hover { background: #4338ca; }
+  .quick-words {
+    display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap;
+  }
+  .quick-words span {
+    font-size: 12.5px; color: var(--muted); padding: 4px 12px; background: #fff;
+    border-radius: 999px; cursor: pointer; box-shadow: var(--shadow); transition: all .15s;
+  }
+  .quick-words span:hover { color: var(--primary); transform: translateY(-1px); }
+
+  /* ===== 双栏结果区：宽屏并排，窄屏堆叠 ===== */
+  .result-grid {
+    max-width: 1080px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .result-grid { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .main { padding: 20px; }
+  }
+
+  .panel {
+    background: var(--card); border-radius: 14px; box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 14px 20px; font-size: 13px; font-weight: 700; letter-spacing: .5px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-dict .panel-head {
+    background: linear-gradient(135deg, #eef2ff, #e0e7ff); color: var(--primary);
+  }
+  .panel-llm .panel-head {
+    background: linear-gradient(135deg, #fdf4ff, #fae8ff); color: #a21caf;
+  }
+  .panel-body { padding: 20px; }
+
+  /* 词典面板 */
+  .dict-word-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .dict-word { font-size: 26px; font-weight: 700; }
+  .phonetic { font-size: 13px; color: var(--muted-2); font-family: 'Courier New', monospace; }
+  .pho-tag {
+    font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;
+    margin-right: 3px; vertical-align: middle;
+  }
+  .pho-tag.uk { background: #dbeafe; color: #1d4ed8; }
+  .pho-tag.us { background: #fce7f3; color: #be185d; }
+
+  .dict-section { margin-bottom: 14px; }
+  .dict-label {
+    font-size: 11px; font-weight: 600; color: var(--muted-2);
+    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px;
+  }
+  .dict-meaning { font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
+  .dict-example {
+    font-size: 13.5px; color: var(--muted); line-height: 1.7;
+    padding: 8px 12px; background: #f8fafc; border-radius: 8px; margin-bottom: 6px;
+    border-left: 3px solid #e0e7ff;
+  }
+  .dict-example .zh { display: block; font-size: 12.5px; color: var(--muted-2); margin-top: 2px; }
+  .dict-example em { color: var(--primary); font-style: normal; font-weight: 600; }
+
+  /* LLM 面板 */
+  .llm-block { margin-bottom: 16px; }
+  .llm-block .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px;
+    border-radius: 4px; margin-bottom: 6px;
+  }
+  .tag-domain { background: #ede9fe; color: #6d28d9; }
+  .tag-term { background: #e0e7ff; color: #4338ca; }
+  .llm-term {
+    font-size: 22px; font-weight: 700; color: #4338ca; letter-spacing: 1px;
+  }
+  .tag-general { background: #f1f5f9; color: #64748b; }
+  .tag-abbr { background: #fef3c7; color: #b45309; }
+  .tag-example { background: #dcfce7; color: #15803d; }
+  .llm-text { font-size: 14px; line-height: 1.75; }
+  .llm-text.domain { font-weight: 500; }
+  .llm-example-text {
+    font-size: 13.5px; color: var(--muted); font-style: italic;
+  }
+  .llm-example-zh {
+    font-size: 12.5px; color: var(--muted-2); margin-top: 2px; font-style: normal;
+  }
+  .cursor {
+    display: inline-block; width: 8px; height: 16px; background: #a21caf;
+    vertical-align: text-bottom; margin-left: 2px;
+    animation: blink .8s infinite;
+  }
+  @keyframes blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
+
+  /* 骨架屏 */
+  .skeleton { padding: 20px; }
+  .sk-line {
+    height: 12px; border-radius: 6px; margin-bottom: 12px;
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.2s infinite;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+  /* 收藏栏 */
+  .fav-bar {
+    max-width: 1080px; margin: 18px auto 0; display: flex; gap: 12px;
+    justify-content: center;
+  }
+  .btn {
+    padding: 10px 24px; border: none; border-radius: 10px; font-size: 14.5px;
+    font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s;
+  }
+  .btn-fav {
+    background: linear-gradient(120deg, #4f46e5, #7c3aed); color: #fff;
+    box-shadow: 0 4px 14px rgba(79,70,229,.35);
+  }
+  .btn-fav:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,.45); }
+  .btn-fav.saved { background: #059669; box-shadow: 0 4px 14px rgba(5,150,105,.3); }
+  .btn-outline {
+    background: #fff; color: var(--primary); border: 1px solid #c7d2fe;
+  }
+  .btn-outline:hover { background: #eef2ff; }
+
+  .empty-hint {
+    max-width: 860px; margin: 60px auto; text-align: center; color: var(--muted-2);
+  }
+  .empty-hint .icon { font-size: 52px; margin-bottom: 14px; }
+  .empty-hint p { font-size: 14.5px; line-height: 1.8; }
+
+  .hidden { display: none; }
+
+  /* toast */
+  .toast {
+    position: fixed; top: 22px; right: 22px; z-index: 99;
+    padding: 11px 18px; border-radius: 10px; font-size: 13.5px; color: #fff;
+    background: #059669; box-shadow: var(--shadow-md);
+    animation: toast-in .25s ease;
+  }
+  @keyframes toast-in { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="logo">📖 DanCiJi</div>
+    <nav>
+      <a class="active"><span class="ic">🔍</span>词典</a>
+      <a><span class="ic">📝</span>新建</a>
+      <a><span class="ic">📚</span>词库</a>
+      <a><span class="ic">🏷️</span>标签</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="search-hero">
+      <div class="title">查单词 · 记术语</div>
+      <div class="search-box">
+        <input id="kw" placeholder="输入单词、短语或领域缩写，如 token / chain of thought / RAG ..." autofocus>
+        <button onclick="doSearch()">搜索</button>
+      </div>
+      <div class="quick-words">
+        <span onclick="quickSearch('token')">token</span>
+        <span onclick="quickSearch('RAG')">RAG</span>
+        <span onclick="quickSearch('attention')">attention</span>
+        <span onclick="quickSearch('chain of thought')">chain of thought</span>
+      </div>
+    </div>
+
+    <div id="empty" class="empty-hint">
+      <div class="icon">🔍</div>
+      <p>左边是词典的通用释义，右边是大模型的领域解读<br>查到之后一键收藏进你的词库</p>
+    </div>
+
+    <div id="result" class="hidden">
+      <div class="result-grid">
+        <!-- 左栏：词典 -->
+        <div class="panel panel-dict">
+          <div class="panel-head">📖 词典释义</div>
+          <div id="dict-body" class="panel-body"></div>
+        </div>
+        <!-- 右栏：大模型 -->
+        <div class="panel panel-llm">
+          <div class="panel-head">🤖 大模型 · 领域翻译</div>
+          <div id="llm-body" class="panel-body"></div>
+        </div>
+      </div>
+
+      <div id="fav-bar" class="fav-bar hidden">
+        <button id="fav-btn" class="btn btn-fav" onclick="doFav()">⭐ 收藏入词库</button>
+        <button class="btn btn-outline" onclick="doRegen()">🔄 重新生成</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ===== Mock 数据（demo 用，真实版由后端 API 返回） =====
+const MOCK = {
+  'token': {
+    dict: {
+      word: 'token', uk: '/ˈtəʊkən/', us: '/ˈtoʊkən/',
+      meaning: 'n. （人工智能和大语言模型）词元；（某些机器中用以代替纸币的）代币，专用辅币；象征，标志；（语言学）符号；（计算机）令牌\nadj. 装点门面的，装样子的；象征性的',
+      examples: [
+        { en: 'We charge only a token fee for the facilities.', zh: '我们对使用这些设施只收取象征性的费用。' },
+        { en: 'This inbound login module generates the token.', zh: '这个入站登录模块会生成令牌。' }
+      ]
+    },
+    llm: [
+      { tag: 'tag-term', label: '中文定名', cls: 'term', text: '词元' },
+      { tag: 'tag-domain', label: '领域详解', cls: 'domain', text: '大模型处理文本的最小单位。LLM 不直接读字符，而是先把文本切成 token（可能是词、子词或单字）再编码。计费、上下文长度限制（如 128K）都以 token 计。中文约 1~2 字/token，英文约 0.75 词/token。' },
+      { tag: 'tag-example', label: '领域例句', cls: '', text: 'The prompt is truncated when it exceeds the 8K token limit.', en: true, zh: '当提示词超过 8K token 上限时会被截断。' }
+    ]
+  },
+  'rag': {
+    dict: {
+      word: 'rag', uk: '/ræɡ/', us: '/ræɡ/',
+      meaning: 'n. 抹布，破布；<非正式>质量低劣的报纸，小报\nv. <英，旧，非正式> 嘲笑，戏弄',
+      examples: [
+        { en: 'He was wiping his hands on an oily rag.', zh: '他用一块油腻的抹布擦手。' }
+      ]
+    },
+    llm: [
+      { tag: 'tag-term', label: '中文定名', cls: 'term', text: '检索增强' },
+      { tag: 'tag-abbr', label: '缩写展开', cls: '', text: 'Retrieval-Augmented Generation，检索增强生成。' },
+      { tag: 'tag-domain', label: '领域详解', cls: 'domain', text: '让 LLM 先检索外部知识库拿到相关文档片段，再基于这些内容生成回答的技术方案。解决大模型知识截止、幻觉和私有数据接入三大问题，是企业级 LLM 应用的主流架构。' },
+      { tag: 'tag-example', label: '领域例句', cls: '', text: 'We built a RAG pipeline with vector search to ground the model\'s answers.', en: true, zh: '我们用向量检索搭建了 RAG 流水线，让模型的回答有据可依。' }
+    ]
+  },
+  'chain of thought': {
+    dict: null,  // 模拟词典查不到短语的情况
+    llm: [
+      { tag: 'tag-term', label: '中文定名', cls: 'term', text: '思维链' },
+      { tag: 'tag-abbr', label: '缩写展开', cls: '', text: '常缩写为 CoT，Chain-of-Thought。' },
+      { tag: 'tag-domain', label: '领域详解', cls: 'domain', text: '提示词技术：引导 LLM 把推理过程一步步写出来再给出答案，而非直接输出结果。能显著提升数学、逻辑等复杂推理任务的表现。典型写法是在 prompt 里加 "Let\'s think step by step"。' },
+      { tag: 'tag-example', label: '领域例句', cls: '', text: 'Chain-of-thought prompting elicits reasoning in large language models.', en: true, zh: '思维链提示能够激发大语言模型的推理能力。' }
+    ]
+  },
+  'attention': {
+    dict: {
+      word: 'attention', uk: '/əˈten.ʃən/', us: '/əˈten.ʃən/',
+      meaning: 'n. 注意，专心；关注；照料，照顾\nint. 注意，立正',
+      examples: [
+        { en: 'She tried to attract the waiter\'s attention.', zh: '她试图引起服务员的注意。' }
+      ]
+    },
+    llm: [
+      { tag: 'tag-term', label: '中文定名', cls: 'term', text: '注意力机制' },
+      { tag: 'tag-domain', label: '领域详解', cls: 'domain', text: 'Transformer 的核心组件，让模型在处理每个位置时动态权衡序列中其他位置的重要性（Q/K/V 三矩阵运算）。论文《Attention Is All You Need》由此命名。' },
+      { tag: 'tag-example', label: '领域例句', cls: '', text: 'Multi-head attention allows the model to attend to different representation subspaces.', en: true, zh: '多头注意力让模型能同时关注不同的表示子空间。' }
+    ]
+  }
+};
+
+function quickSearch(w) {
+  document.getElementById('kw').value = w;
+  doSearch();
+}
+
+function doSearch() {
+  const kw = document.getElementById('kw').value.trim();
+  if (!kw) return;
+  const data = MOCK[kw.toLowerCase()] || MOCK['token'];
+
+  document.getElementById('empty').classList.add('hidden');
+  document.getElementById('result').classList.remove('hidden');
+  document.getElementById('fav-bar').classList.add('hidden');
+  resetFavBtn();
+
+  renderDict(data.dict, kw);
+  streamLLM(data.llm);
+}
+
+function renderDict(dict, kw) {
+  const body = document.getElementById('dict-body');
+  body.innerHTML = `<div class="skeleton" style="padding:0">
+    <div class="sk-line" style="width:40%"></div>
+    <div class="sk-line" style="width:90%"></div>
+    <div class="sk-line" style="width:75%"></div>
+  </div>`;
+
+  setTimeout(() => {
+    if (!dict) {
+      body.innerHTML = `<div style="color:var(--muted-2);font-size:14px;padding:8px 0">
+        词典未收录「${kw}」<br>
+        <span style="font-size:12.5px">可能是短语或领域缩写，可参考右侧大模型的解读 👉</span>
+      </div>`;
+      return;
+    }
+    const showBoth = dict.uk !== dict.us;
+    body.innerHTML = `
+      <div class="dict-word-row">
+        <span class="dict-word">${dict.word}</span>
+        <span class="phonetic"><span class="pho-tag uk">UK</span>${dict.uk}</span>
+        ${showBoth ? `<span class="phonetic"><span class="pho-tag us">US</span>${dict.us}</span>` : ''}
+      </div>
+      <div class="dict-section">
+        <div class="dict-label">释义</div>
+        <div class="dict-meaning">${dict.meaning}</div>
+      </div>
+      <div class="dict-section">
+        <div class="dict-label">例句</div>
+        ${dict.examples.map(e => `<div class="dict-example">${e.en}<span class="zh">${e.zh}</span></div>`).join('')}
+      </div>`;
+  }, 500);
+}
+
+// 模拟 SSE 流式输出：逐字打出
+function streamLLM(blocks) {
+  const body = document.getElementById('llm-body');
+  body.innerHTML = blocks.map(b => `
+    <div class="llm-block">
+      <span class="tag ${b.tag}">${b.label}</span>
+      <div class="llm-text ${b.cls === 'term' ? 'llm-term' : b.cls} ${b.en ? 'llm-example-text' : ''}" data-full="${b.text.replace(/"/g, '&quot;')}"></div>
+      ${b.zh ? `<div class="llm-text llm-example-zh" data-full="${b.zh.replace(/"/g, '&quot;')}"></div>` : ''}
+    </div>`).join('') + '<span class="cursor" id="cursor"></span>';
+
+  const els = body.querySelectorAll('.llm-text');
+  let bi = 0, ci = 0;
+  const cursor = document.getElementById('cursor');
+
+  function type() {
+    if (bi >= els.length) {
+      cursor.remove();
+      document.getElementById('fav-bar').classList.remove('hidden');
+      return;
+    }
+    const el = els[bi];
+    const full = el.dataset.full;
+    if (ci === 0) el.parentNode.appendChild(cursor);
+    el.textContent = full.slice(0, ++ci);
+    if (ci >= full.length) { bi++; ci = 0; setTimeout(type, 150); }
+    else setTimeout(type, 12);
+  }
+  setTimeout(type, 400);
+}
+
+function doFav() {
+  const btn = document.getElementById('fav-btn');
+  btn.classList.add('saved');
+  btn.textContent = '✓ 已收藏到词库';
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = '已收藏！「中文定名」→ cn_term（并预填我的理解），「领域详解」→ 领域详解，词典释义 → 通用释义';
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+function resetFavBtn() {
+  const btn = document.getElementById('fav-btn');
+  btn.classList.remove('saved');
+  btn.textContent = '⭐ 收藏入词库';
+}
+function doRegen() {
+  const kw = document.getElementById('kw').value.trim();
+  const data = MOCK[kw.toLowerCase()] || MOCK['token'];
+  document.getElementById('fav-bar').classList.add('hidden');
+  streamLLM(data.llm);
+}
+
+document.getElementById('kw').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>

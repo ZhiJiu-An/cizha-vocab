@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DanCiJi - Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+    background: #f4f6fb;
+    color: #1e293b;
+    min-height: 100vh;
+  }
+
+  /* ======= Layout ======= */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 200px; flex-shrink: 0;
+    background: linear-gradient(180deg, #4f46e5, #6366f1);
+    color: #fff; padding: 28px 0;
+  }
+  .sidebar .logo { font-size: 20px; font-weight: 700; padding: 0 24px 32px; letter-spacing: 0.5px; }
+  .sidebar a {
+    display: block; padding: 12px 24px; color: rgba(255,255,255,0.8);
+    text-decoration: none; font-size: 14.5px; border-left: 3px solid transparent;
+    transition: all .2s;
+  }
+  .sidebar a:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .sidebar a.active { background: rgba(255,255,255,0.15); color: #fff; border-left-color: #fff; }
+  .sidebar a .ic { margin-right: 8px; }
+
+  .main { flex: 1; padding: 32px 40px; overflow-y: auto; }
+  .page-title { font-size: 22px; font-weight: 700; margin-bottom: 24px; }
+
+  /* ======= Tab ======= */
+  .tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0; }
+  .tab {
+    padding: 10px 20px; cursor: pointer; font-size: 14px; color: #64748b;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all .2s;
+  }
+  .tab:hover { color: #4f46e5; }
+  .tab.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 600; }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ======= 新建表单 ======= */
+  .form-card {
+    background: #fff; border-radius: 14px; padding: 32px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    max-width: 640px;
+  }
+  .form-row { margin-bottom: 18px; }
+  .form-row label {
+    display: block; font-size: 13px; color: #64748b;
+    margin-bottom: 6px; font-weight: 500;
+  }
+  .form-row input, .form-row textarea {
+    width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 8px;
+    font-size: 14px; font-family: inherit; transition: border-color .2s; background: #fafbfe;
+  }
+  .form-row input:focus, .form-row textarea:focus {
+    outline: none; border-color: #6366f1; background: #fff;
+  }
+  .form-row textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
+
+  .input-group { display: flex; gap: 10px; }
+  .input-group input { flex: 1; }
+
+  .btn {
+    padding: 9px 18px; border: none; border-radius: 8px; font-size: 14px;
+    cursor: pointer; font-family: inherit; transition: all .2s; font-weight: 500;
+  }
+  .btn-primary { background: #4f46e5; color: #fff; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-outline { background: #fff; color: #4f46e5; border: 1px solid #c7d2fe; }
+  .btn-outline:hover { background: #eef2ff; }
+  .btn-ghost { background: transparent; color: #64748b; }
+  .btn-ghost:hover { background: #f1f5f9; color: #4f46e5; }
+
+  .auto-fill-box {
+    background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+    border: 1px dashed #c7d2fe; border-radius: 10px;
+    padding: 16px; margin-bottom: 18px;
+  }
+  .auto-fill-box .hint {
+    font-size: 12.5px; color: #4f46e5; margin-bottom: 10px; font-weight: 500;
+  }
+  .auto-fill-box .fields {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+
+  .section-title {
+    font-size: 12px; font-weight: 600; color: #94a3b8;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #f1f5f9;
+  }
+
+  /* ======= 卡片列表 ======= */
+  .toolbar {
+    display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;
+  }
+  .toolbar .search {
+    flex: 1; min-width: 240px; padding: 10px 14px; border: 1px solid #e2e8f0;
+    border-radius: 8px; font-size: 14px; background: #fff;
+  }
+  .toolbar .count { font-size: 13px; color: #64748b; }
+
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+  .tag {
+    padding: 4px 12px; border-radius: 999px; font-size: 12px;
+    background: #eef2ff; color: #4f46e5; cursor: pointer; transition: all .15s;
+  }
+  .tag:hover { background: #e0e7ff; }
+  .tag.active { background: #4f46e5; color: #fff; }
+
+  .cards { display: grid; gap: 16px; }
+
+  .card {
+    background: #fff; border-radius: 14px; padding: 22px 26px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
+    border-left: 4px solid #cbd5e1; transition: all .2s;
+  }
+  .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-1px); }
+  .card.has-abbr { border-left-color: #4f46e5; }
+  .card.has-abbr.no-api { border-left-color: #f59e0b; }
+  .card.no-abbr { border-left-color: #10b981; }
+
+  .card-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+  .card-abbr { font-size: 22px; font-weight: 700; color: #1e293b; letter-spacing: 0.3px; }
+  .card-full { font-size: 14px; color: #64748b; }
+
+  /* 音标紧跟单词 */
+  .card-phos {
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .card-phonetic {
+    font-size: 12.5px; color: #94a3b8; font-family: 'Courier New', monospace;
+  }
+  .pho-tag {
+    font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;
+    margin-right: 3px; vertical-align: middle;
+  }
+  .pho-tag.uk { background: #dbeafe; color: #1d4ed8; }
+  .pho-tag.us { background: #fce7f3; color: #be185d; }
+  .pho-empty { font-size: 12.5px; color: #cbd5e1; }
+
+  .card-spacer { flex: 1; }
+
+  .card-row { margin: 8px 0; font-size: 14px; line-height: 1.6; }
+  .card-row .label {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    padding: 1px 6px; border-radius: 4px; margin-right: 8px; vertical-align: middle;
+  }
+  .label-mine { background: #ede9fe; color: #6d28d9; }
+  .label-api { background: #f1f5f9; color: #64748b; }
+
+  .my-meaning { color: #1e293b; font-weight: 500; }
+  .api-meaning { color: #94a3b8; }
+
+  .card-foot {
+    display: flex; gap: 8px; align-items: center;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9;
+  }
+  .card-tags { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; }
+  .card-tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 4px;
+    background: #f1f5f9; color: #64748b;
+  }
+  .card-time { font-size: 12px; color: #cbd5e1; }
+  .card-actions { display: flex; gap: 4px; }
+
+  /* ======= Badge ======= */
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 4px;
+    font-size: 10.5px; font-weight: 600; margin-left: 8px; vertical-align: middle;
+  }
+  .badge-abbr { background: #ede9fe; color: #6d28d9; }
+  .badge-term { background: #fef3c7; color: #b45309; }
+  .badge-word { background: #dcfce7; color: #15803d; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="logo">📖 DanCiJi</div>
+    <a href="#" class="active"><span class="ic">🏠</span>首页</a>
+    <a href="#"><span class="ic">📝</span>新建</a>
+    <a href="#"><span class="ic">📚</span>词库</a>
+    <a href="#"><span class="ic">🏷️</span>标签</a>
+  </aside>
+
+  <main class="main">
+    <div class="page-title">🏠 首页</div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('list')">📚 词库浏览（卡片）</div>
+      <div class="tab" onclick="switchTab('new')">✏️ 新建单词/术语</div>
+    </div>
+
+    <!-- ============ 视图 1：词库卡片 ============ -->
+    <div id="view-list" class="view active">
+      <div class="toolbar">
+        <input class="search" placeholder="🔍 搜索缩写、全称、释义、标签...">
+        <span class="count" id="total-count">共 0 条</span>
+        <button class="btn btn-outline">📤 导出 CSV</button>
+        <button class="btn btn-primary" onclick="switchTab('new')">➕ 新建</button>
+      </div>
+
+      <div class="tags" id="tag-bar">
+        <!-- JS 渲染 -->
+      </div>
+
+      <div class="cards" id="card-list">
+        <!-- JS 渲染 -->
+      </div>
+    </div>
+
+    <!-- ============ 视图 2：新建 ============ -->
+    <div id="view-new" class="view">
+      <div class="form-card">
+        <div class="section-title">✏️ 基本信息</div>
+
+        <div class="form-row">
+          <label>缩写 / 主词 *</label>
+          <input type="text" placeholder="如 RAG / apple" value="RAG">
+        </div>
+
+        <div class="form-row">
+          <label>全称（缩写术语必填，普通单词可留空）</label>
+          <input type="text" placeholder="如 Retrieval-Augmented Generation" value="Retrieval-Augmented Generation">
+        </div>
+
+        <div class="input-group">
+          <div class="form-row" style="flex:1">
+            <label>🇬🇧 英式音标</label>
+            <input type="text" placeholder="/ræɡ/">
+          </div>
+          <div class="form-row" style="flex:1">
+            <label>🇺🇸 美式音标</label>
+            <input type="text" placeholder="/ræɡ/">
+          </div>
+        </div>
+
+        <!-- 自动补全区 -->
+        <div class="auto-fill-box">
+          <div class="hint">✨ 点"自动补全"可调词典 API 回填音标、通用释义、例句</div>
+          <div style="display:flex;gap:10px;margin-bottom:12px">
+            <button class="btn btn-outline">🔍 自动补全</button>
+            <span style="font-size:12px;color:#94a3b8;align-self:center">
+              ← 点了之后下面的音标、通用释义、例句会被 API 结果覆盖
+            </span>
+          </div>
+        </div>
+
+        <div class="section-title">📝 释义（最重要）</div>
+
+        <div class="form-row">
+          <label>💡 我的理解（必填）— 这是你真正想记住的</label>
+          <textarea placeholder="用自己的话解释这个词在你领域里的意思...">检索增强生成，大模型接入外部知识库的主流方案。检索文档片段拼到 prompt 里，让 LLM 基于事实回答。</textarea>
+        </div>
+
+        <div class="form-row">
+          <label>📖 通用释义（API 返回，可改可删）</label>
+          <textarea placeholder="API 自动填入...">n. 破旧衣服; 瓦砾; 垃圾</textarea>
+        </div>
+
+        <div class="section-title">🔧 其他</div>
+
+        <div class="form-row">
+          <label>例句（API 返回或自己加）</label>
+          <textarea>RAG is a technique that augments large language models with external knowledge retrieved from a vector database.</textarea>
+        </div>
+
+        <div class="input-group">
+          <div class="form-row" style="flex:1">
+            <label>标签（用逗号分隔）</label>
+            <input type="text" value="大模型, RAG, 论文">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>备注</label>
+          <textarea placeholder="其他想记录的..."></textarea>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:24px">
+          <button class="btn btn-primary" style="padding:10px 28px">💾 保存</button>
+          <button class="btn btn-ghost">🔄 清空</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ===== 样例数据 =====
+const words = [
+  {
+    abbreviation: 'RAG', full_name: 'Retrieval-Augmented Generation',
+    pho_uk: '/ræɡ/', pho_us: '/ræɡ/',
+    api_meaning: 'n. 破旧衣服; 瓦砾; 垃圾',
+    my_meaning: '检索增强生成，大模型接入外部知识库的主流方案。检索文档片段拼到 prompt 里，让 LLM 基于事实回答。',
+    tags: ['大模型', 'RAG', '论文'], time: '3天前',
+    has_abbr: true, api_ok: true,
+  },
+  {
+    abbreviation: 'CoT', full_name: 'Chain-of-Thought',
+    pho_uk: '', pho_us: '',
+    api_meaning: '',
+    my_meaning: '思维链。通过让 LLM 一步步写出中间推理过程来提升复杂任务（数学、逻辑）的准确率。',
+    tags: ['大模型', '提示词', '推理'], time: '5天前',
+    has_abbr: true, api_ok: false,
+  },
+  {
+    abbreviation: 'KV Cache', full_name: 'Key-Value Cache',
+    pho_uk: '', pho_us: '',
+    api_meaning: '',
+    my_meaning: '推理时缓存每步的 attention K/V，避免重复计算已生成 token 的上下文，大幅提升生成速度。',
+    tags: ['大模型', '推理优化'], time: '1周前',
+    has_abbr: true, api_ok: false,
+  },
+  {
+    abbreviation: 'attention', full_name: '',
+    pho_uk: '/əˈten.ʃən/', pho_us: '/əˈten.ʃən/',
+    api_meaning: 'n. 注意; 专心; 关心',
+    my_meaning: '注意力机制，Transformer 架构的核心。让每个 token 动态地"关注"序列中其他 token 的相关程度。',
+    tags: ['深度学习', 'Transformer'], time: '1周前',
+    has_abbr: false, api_ok: true,
+  },
+  {
+    abbreviation: 'LoRA', full_name: 'Low-Rank Adaptation',
+    pho_uk: '', pho_us: '',
+    api_meaning: '',
+    my_meaning: '低秩适配。参数高效微调方法，只训练原模型权重矩阵的低秩分解增量，冻结主干，训练量小效果好。',
+    tags: ['大模型', '微调', '参数高效'], time: '2周前',
+    has_abbr: true, api_ok: false,
+  },
+  {
+    abbreviation: 'token', full_name: '',
+    pho_uk: '/ˈtəʊ.kən/', pho_us: '/ˈtoʊ.kən/',
+    api_meaning: 'n. 代币; 象征; 凭证',
+    my_meaning: 'LLM 处理文本的最小单位。一个英文单词通常 = 1-2 个 token，中文字符 = 1-2 个 token。决定上下文长度和费用。',
+    tags: ['大模型', '基础'], time: '2周前',
+    has_abbr: false, api_ok: true,
+  },
+  {
+    abbreviation: 'peft', full_name: 'Parameter-Efficient Fine-Tuning',
+    pho_uk: '', pho_us: '',
+    api_meaning: '',
+    my_meaning: '参数高效微调。一类只训练少量参数的微调方法，包括 LoRA、Prefix Tuning、Prompt Tuning 等。',
+    tags: ['大模型', '微调'], time: '昨天',
+    has_abbr: true, api_ok: false,
+  },
+];
+
+const allTags = ['全部', '大模型', 'RAG', '论文', '提示词', '推理', '推理优化', '深度学习', 'Transformer', '微调', '参数高效', '基础'];
+let activeTag = '全部';
+
+// ===== 渲染标签栏 =====
+const tagBar = document.getElementById('tag-bar');
+allTags.forEach(t => {
+  const el = document.createElement('span');
+  el.className = 'tag' + (t === '全部' ? ' active' : '');
+  el.textContent = t;
+  el.onclick = () => {
+    document.querySelectorAll('#tag-bar .tag').forEach(x => x.classList.remove('active'));
+    el.classList.add('active');
+    activeTag = t;
+    renderCards();
+  };
+  tagBar.appendChild(el);
+});
+
+// ===== 渲染卡片 =====
+const cardList = document.getElementById('card-list');
+document.getElementById('total-count').textContent = `共 ${words.length} 条`;
+
+function renderCards() {
+  const filtered = activeTag === '全部'
+    ? words
+    : words.filter(w => w.tags.includes(activeTag));
+
+  cardList.innerHTML = '';
+  filtered.forEach(w => {
+    const card = document.createElement('div');
+
+    // 边框颜色
+    let cls = 'card';
+    if (w.has_abbr && w.api_ok) cls += ' has-abbr';         // 蓝边
+    else if (w.has_abbr && !w.api_ok) cls += ' has-abbr no-api'; // 黄边
+    else cls += ' no-abbr';                                  // 绿边
+
+    // 类型徽章
+    let badge = '';
+    if (w.has_abbr) {
+      badge = w.api_ok
+        ? '<span class="badge badge-abbr">缩写·有通用释义</span>'
+        : '<span class="badge badge-term">缩写·纯术语</span>';
+    } else {
+      badge = '<span class="badge badge-word">普通单词</span>';
+    }
+
+    // 音标（紧跟单词，带 UK/US 标签）
+    let phoHtml = '';
+    if (w.pho_uk || w.pho_us) {
+      phoHtml = '<div class="card-phos">';
+      if (w.pho_uk) phoHtml += `<span class="card-phonetic"><span class="pho-tag uk">UK</span>${w.pho_uk}</span>`;
+      if (w.pho_us && w.pho_us !== w.pho_uk) phoHtml += `<span class="card-phonetic"><span class="pho-tag us">US</span>${w.pho_us}</span>`;
+      phoHtml += '</div>';
+    }
+
+    card.className = cls;
+    card.innerHTML = `
+      <div class="card-head">
+        <span class="card-abbr">${w.abbreviation}${badge}</span>
+        ${phoHtml}
+        ${w.full_name ? `<span class="card-full">${w.full_name}</span>` : ''}
+        <span class="card-spacer"></span>
+      </div>
+
+      <div class="card-row">
+        <span class="label label-mine">💡 我的理解</span>
+        <span class="my-meaning">${w.my_meaning}</span>
+      </div>
+
+      ${w.api_meaning ? `
+      <div class="card-row">
+        <span class="label label-api">📖 通用释义</span>
+        <span class="api-meaning">${w.api_meaning}</span>
+      </div>
+      ` : ''}
+
+      <div class="card-foot">
+        <div class="card-tags">
+          ${w.tags.map(t => `<span class="card-tag">#${t}</span>`).join('')}
+        </div>
+        <span class="card-time">${w.time}</span>
+        <div class="card-actions">
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px">编辑</button>
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;color:#ef4444">删除</button>
+        </div>
+      </div>
+    `;
+    cardList.appendChild(card);
+  });
+}
+renderCards();
+
+// ===== Tab 切换 =====
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+}
+</script>
+</body>
+</html>
