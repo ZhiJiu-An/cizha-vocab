@@ -1,7 +1,8 @@
-"""词条 CRUD + CSV 批量导入 / 导出 + 标签聚合 (v0.4)"""
+"""词条 CRUD + CSV 批量导入 / 导出 + 标签聚合 (v0.5)"""
 import csv
 import io
 import json
+from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -26,6 +27,11 @@ CSV_COLUMNS = [
 def _derive_has_abbr(full_name: str) -> int:
     """有全称即视为缩写术语"""
     return 1 if (full_name or "").strip() else 0
+
+
+def _today_start() -> datetime:
+    """今天 00:00 —— 新词条默认当天即到期，进复习队列"""
+    return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def _norm_examples(items) -> List[dict]:
@@ -85,6 +91,7 @@ def create_word(word_data: WordCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"词条「{data['abbreviation']}」已存在")
 
     data["has_abbr"] = _derive_has_abbr(data["full_name"])
+    data["next_review_at"] = _today_start()  # 新词默认进复习队列，当天到期
     word = Word(**data)
     db.add(word)
     db.commit()
@@ -127,6 +134,7 @@ def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
             continue
 
         data["has_abbr"] = _derive_has_abbr(data["full_name"])
+        data["next_review_at"] = _today_start()  # 新词默认进复习队列，当天到期
         word = Word(**data)
         db.add(word)
         db.flush()
