@@ -11,6 +11,7 @@
       <div class="card-head" style="margin-bottom: 22px">
         <span class="card-abbr">
           {{ word.abbreviation }}
+          <span v-if="word.cn_term" class="card-cn">{{ word.cn_term }}</span>
           <span class="badge" :class="cardType(word).badge">{{ cardType(word).text }}</span>
         </span>
         <div v-if="word.phonetic_uk || word.phonetic_us" class="card-phos">
@@ -38,10 +39,16 @@
         <div class="v muted">{{ word.api_meaning || '—' }}</div>
       </div>
 
+      <div v-if="word.domain_detail" class="detail-block">
+        <div class="k">🤖 领域详解</div>
+        <div class="v">{{ word.domain_detail }}</div>
+      </div>
+
       <div v-if="word.examples && word.examples.length" class="detail-block">
         <div class="k">例句</div>
-        <div v-for="(ex, i) in word.examples" :key="i" class="v" style="margin-bottom: 4px">
-          · {{ ex }}
+        <div v-for="(ex, i) in word.examples" :key="i" class="v dict-example">
+          · {{ exampleText(ex).en }}
+          <span v-if="exampleText(ex).zh" class="zh">{{ exampleText(ex).zh }}</span>
         </div>
       </div>
 
@@ -124,6 +131,12 @@ const router = useRouter()
 const word = ref(null)
 const loading = ref(true)
 const showConfirm = ref(false)
+
+// 例句兼容：v0.4 为 {en, zh} 对象，旧数据可能仍是纯字符串
+function exampleText(ex) {
+  if (ex && typeof ex === 'object') return { en: ex.en || '', zh: ex.zh || '' }
+  return { en: String(ex ?? ''), zh: '' }
+}
 
 async function confirmDelete() {
   showConfirm.value = false

@@ -4,7 +4,7 @@
 
     <!-- 工具栏 -->
     <div class="toolbar">
-      <input v-model="keyword" class="search" placeholder="🔍 搜索缩写、全称、我的理解、通用释义、标签..." />
+      <input v-model="keyword" class="search" placeholder="🔍 搜索缩写、全称、中文定名、我的理解、领域详解、标签..." />
       <select v-model="sort">
         <option value="time_desc">最新优先</option>
         <option value="time_asc">最早优先</option>
@@ -48,6 +48,9 @@
             {{ w.abbreviation }}
             <span class="badge" :class="cardType(w).badge">{{ cardType(w).text }}</span>
           </span>
+
+          <!-- 中文定名 chip 紧跟主词 -->
+          <span v-if="w.cn_term" class="card-cn">{{ w.cn_term }}</span>
 
           <!-- 音标紧跟主词 -->
           <div v-if="w.phonetic_uk || w.phonetic_us" class="card-phos">

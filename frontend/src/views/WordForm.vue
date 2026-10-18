@@ -19,6 +19,11 @@
         <input v-model="form.full_name" placeholder="如 Retrieval-Augmented Generation" />
       </div>
 
+      <div class="form-row">
+        <label>中文定名（通行译名，如 词元 / 检索增强）</label>
+        <input v-model="form.cn_term" placeholder="如 词元" />
+      </div>
+
       <div class="input-group">
         <div class="form-row">
           <label>🇬🇧 英式音标</label>
@@ -49,6 +54,15 @@
       </div>
 
       <div class="form-row">
+        <label>🤖 领域详解（大模型生成的长段解读，可改）</label>
+        <textarea
+          v-model="form.domain_detail"
+          rows="4"
+          placeholder="收藏搜索结果时自动带入，也可手动补充..."
+        ></textarea>
+      </div>
+
+      <div class="form-row">
         <label>📖 通用释义（词典返回，可改可删）</label>
         <textarea v-model="form.api_meaning" placeholder="点「自动补全」后自动填入..."></textarea>
       </div>
@@ -56,8 +70,12 @@
       <div class="section-title">其他</div>
 
       <div class="form-row">
-        <label>例句（每行一条）</label>
-        <textarea v-model="form.examplesText" placeholder="每条例句占一行"></textarea>
+        <label>例句（每行一条，格式：英文 || 中文，中文可省）</label>
+        <textarea
+          v-model="form.examplesText"
+          rows="4"
+          placeholder="The prompt is truncated when it exceeds the 8K token limit. || 提示词超过 8K token 上限时会被截断。"
+        ></textarea>
       </div>
 
       <div class="form-row">
@@ -100,13 +118,27 @@ const isEdit = computed(() => editId.value !== null)
 const EMPTY = {
   abbreviation: '',
   full_name: '',
+  cn_term: '',
   phonetic_uk: '',
   phonetic_us: '',
   my_meaning: '',
+  domain_detail: '',
   api_meaning: '',
   examplesText: '',
   tags: '',
   note: '',
+}
+
+/* ===== 例句：行文本 ↔ [{en, zh}] ===== */
+// 行格式：英文 || 中文（中文可省）
+function parseExampleLine(line) {
+  const idx = line.indexOf('||')
+  if (idx === -1) return { en: line.trim(), zh: '' }
+  return { en: line.slice(0, idx).trim(), zh: line.slice(idx + 2).trim() }
+}
+
+function exampleToLine(e) {
+  return e.zh ? `${e.en} || ${e.zh}` : e.en
 }
 
 const form = reactive({ ...EMPTY })
@@ -133,7 +165,7 @@ async function onAutofill() {
     if (r.phonetic_uk) form.phonetic_uk = r.phonetic_uk
     if (r.phonetic_us) form.phonetic_us = r.phonetic_us
     if (r.api_meaning) form.api_meaning = r.api_meaning
-    if (r.examples?.length) form.examplesText = r.examples.join('\n')
+    if (r.examples?.length) form.examplesText = r.examples.map(exampleToLine).join('\n')
     hint.value = { text: '✨ 已回填音标、通用释义、例句，可继续编辑', cls: 'hint ok' }
   } catch (e) {
     hint.value = { text: `⚠️ ${e.message}`, cls: 'hint warn' }
@@ -158,14 +190,18 @@ async function save() {
   const payload = {
     abbreviation: form.abbreviation.trim(),
     full_name: form.full_name.trim(),
+    cn_term: form.cn_term.trim(),
     phonetic_uk: form.phonetic_uk.trim(),
     phonetic_us: form.phonetic_us.trim(),
     my_meaning: form.my_meaning.trim(),
+    domain_detail: form.domain_detail.trim(),
     api_meaning: form.api_meaning.trim(),
     examples: form.examplesText
       .split('\n')
       .map((s) => s.trim())
-      .filter(Boolean),
+      .filter(Boolean)
+      .map(parseExampleLine)
+      .filter((e) => e.en),
     tags: form.tags.trim(),
     note: form.note.trim(),
   }
@@ -199,11 +235,13 @@ onMounted(async () => {
     Object.assign(form, {
       abbreviation: w.abbreviation || '',
       full_name: w.full_name || '',
+      cn_term: w.cn_term || '',
       phonetic_uk: w.phonetic_uk || '',
       phonetic_us: w.phonetic_us || '',
       my_meaning: w.my_meaning || '',
+      domain_detail: w.domain_detail || '',
       api_meaning: w.api_meaning || '',
-      examplesText: (w.examples || []).join('\n'),
+      examplesText: (w.examples || []).map(exampleToLine).join('\n'),
       tags: w.tags || '',
       note: w.note || '',
     })
