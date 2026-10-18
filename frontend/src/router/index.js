@@ -10,6 +10,7 @@ const routes = [
   { path: '/words/:id/edit', name: 'Edit', component: () => import('../views/WordForm.vue') },
   { path: '/words/:id', name: 'Detail', component: () => import('../views/WordDetail.vue') },
   { path: '/tags', name: 'Tags', component: () => import('../views/TagList.vue') },
+  { path: '/review', name: 'Review', component: () => import('../views/Review.vue') },
 ]
 
 const router = createRouter({

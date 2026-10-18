@@ -41,3 +41,9 @@ export const exportCsvUrl = (params = {}) => {
 /* ========= 词典自动补全 ========= */
 export const lookupDictionary = (word) =>
   api.get(`/dictionary/${encodeURIComponent(word)}`).then((r) => r.data)
+
+/* ========= 记忆复习 ========= */
+export const getReviewOverview = () => api.get('/review/overview').then((r) => r.data)
+export const getDueWords = (params = {}) => api.get('/review/due', { params }).then((r) => r.data)
+export const submitReviewAnswer = (wordId, result) =>
+  api.post(`/review/${wordId}/answer`, { result }).then((r) => r.data)
