@@ -2,8 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
+from dotenv import load_dotenv
+
 from .database import engine, Base
 from .routes import words, dictionary, translate
+
+# 加载 backend/.env 中的环境变量（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 等）
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # 确保 data 目录存在（SQLite 文件所在目录）
 os.makedirs(os.path.join(os.path.dirname(__file__), "..", "data"), exist_ok=True)
