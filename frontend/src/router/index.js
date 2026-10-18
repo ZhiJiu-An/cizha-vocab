@@ -1,10 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// 词库列表组件同时用于「首页」与「词库」
+// 词典搜索为默认首页
 const WordList = () => import('../views/WordList.vue')
 
 const routes = [
-  { path: '/', name: 'Home', component: WordList },
+  { path: '/', name: 'Search', component: () => import('../views/Search.vue') },
   { path: '/words', name: 'Words', component: WordList },
   { path: '/new', name: 'New', component: () => import('../views/WordForm.vue') },
   { path: '/words/:id/edit', name: 'Edit', component: () => import('../views/WordForm.vue') },

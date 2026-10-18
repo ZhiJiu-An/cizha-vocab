@@ -34,7 +34,7 @@ import { toastState } from './utils'
 const route = useRoute()
 
 const navItems = [
-  { path: '/', icon: '🏠', title: '首页' },
+  { path: '/', icon: '🔍', title: '词典' },
   { path: '/new', icon: '📝', title: '新建' },
   { path: '/words', icon: '📚', title: '词库' },
   { path: '/tags', icon: '🏷️', title: '标签' },

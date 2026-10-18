@@ -1,0 +1,302 @@
+<template>
+  <div>
+    <!-- ===== 搜索区 ===== -->
+    <div class="search-hero">
+      <div class="title">查单词 · 记术语</div>
+      <div class="search-box">
+        <input
+          v-model="keyword"
+          placeholder="输入单词、短语或领域缩写，如 token / chain of thought / RAG ..."
+          autofocus
+          @keydown.enter="doSearch"
+        >
+        <button @click="doSearch">搜索</button>
+      </div>
+      <div class="quick-words">
+        <span v-for="w in quickWords" :key="w" @click="quickSearch(w)">{{ w }}</span>
+      </div>
+    </div>
+
+    <!-- ===== 空状态 ===== -->
+    <div v-if="!searched" class="empty-hint">
+      <div class="icon">🔍</div>
+      <p>左边是词典的通用释义，右边是大模型的领域解读<br>查到之后一键收藏进你的词库</p>
+    </div>
+
+    <template v-else>
+      <!-- ===== 双栏结果区 ===== -->
+      <div class="result-grid">
+        <!-- 左栏：词典 -->
+        <div class="panel panel-dict">
+          <div class="panel-head">📖 词典释义</div>
+          <div class="panel-body">
+            <div v-if="dictLoading" class="skeleton" style="padding:0">
+              <div class="sk-line" style="width:40%"></div>
+              <div class="sk-line" style="width:90%"></div>
+              <div class="sk-line" style="width:75%"></div>
+            </div>
+            <div v-else-if="dictError" class="panel-hint">⚠️ {{ dictError }}</div>
+            <div v-else-if="dict && !dict.found" class="panel-hint">
+              词典未收录「{{ currentWord }}」<br>
+              <span class="sub">可能是短语或领域缩写，可参考右侧大模型的解读 👉</span>
+            </div>
+            <template v-else-if="dict">
+              <div class="dict-word-row">
+                <span class="dict-word">{{ dict.word }}</span>
+                <span v-if="dict.phonetic_uk" class="dict-phonetic">
+                  <span class="pho-tag uk">UK</span>{{ dict.phonetic_uk }}
+                </span>
+                <span
+                  v-if="dict.phonetic_us && dict.phonetic_us !== dict.phonetic_uk"
+                  class="dict-phonetic"
+                >
+                  <span class="pho-tag us">US</span>{{ dict.phonetic_us }}
+                </span>
+              </div>
+              <div v-if="dict.api_meaning" class="dict-section">
+                <div class="dict-label">释义</div>
+                <div class="dict-meaning">{{ dict.api_meaning }}</div>
+              </div>
+              <div v-if="dict.examples.length" class="dict-section">
+                <div class="dict-label">例句</div>
+                <div v-for="(e, i) in dict.examples" :key="i" class="dict-example">
+                  {{ e.en }}<span v-if="e.zh" class="zh">{{ e.zh }}</span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 右栏：大模型领域翻译 -->
+        <div class="panel panel-llm">
+          <div class="panel-head">🤖 大模型 · 领域翻译</div>
+          <div class="panel-body">
+            <div v-if="llmError" class="panel-hint">⚠️ {{ llmError }}</div>
+            <template v-else>
+              <div v-if="!visibleSections.length" class="skeleton" style="padding:0">
+                <div class="sk-line" style="width:30%"></div>
+                <div class="sk-line" style="width:85%"></div>
+                <div class="sk-line" style="width:70%"></div>
+              </div>
+              <div v-for="sec in visibleSections" :key="sec.key" class="llm-block">
+                <span class="llm-tag" :class="sec.tagCls">{{ sec.label }}</span>
+                <div v-if="sec.text" class="llm-text" :class="sec.textCls">{{ sec.text }}</div>
+                <div v-if="sec.zh" class="llm-text llm-example-zh">{{ sec.zh }}</div>
+              </div>
+              <span v-if="llmStreaming" class="cursor"></span>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 收藏栏 ===== -->
+      <div v-if="streamDone" class="fav-bar">
+        <button class="btn btn-fav" :class="{ saved: favSaved }" :disabled="favSaving || favSaved" @click="doFav">
+          {{ favSaved ? '✓ 已收藏到词库' : (favSaving ? '收藏中…' : '⭐ 收藏入词库') }}
+        </button>
+        <button class="btn btn-outline" :disabled="llmStreaming" @click="doRegen">🔄 重新生成</button>
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup>
+import { computed, ref } from 'vue'
+import { lookupDictionary, createWord } from '../api'
+import { toast } from '../utils'
+
+const quickWords = ['token', 'RAG', 'attention', 'chain of thought']
+
+const keyword = ref('')
+const searched = ref(false)      // 是否已发起过搜索
+const currentWord = ref('')      // 当前搜索词（收藏时作为 abbreviation）
+
+/* ========= 左栏：词典 ========= */
+const dictLoading = ref(false)
+const dict = ref(null)           // DictionaryResult
+const dictError = ref('')
+
+/* ========= 右栏：大模型流式翻译 ========= */
+const llmSections = ref([])      // 解析出的分段 [{key, text}]
+const llmStreaming = ref(false)
+const llmError = ref('')
+const streamDone = ref(false)    // 流正常结束（出现收藏栏）
+let abortCtrl = null             // 中断上一次未完成的 SSE
+
+/* ========= 收藏 ========= */
+const favSaving = ref(false)
+const favSaved = ref(false)
+
+// 五段标记 → 板块映射（「无」的板块不显示）
+const SECTION_META = {
+  '定名': { label: '中文定名', tagCls: 'tag-term', textCls: 'llm-term' },
+  '展开': { label: '缩写展开', tagCls: 'tag-abbr', textCls: '' },
+  '详解': { label: '领域详解', tagCls: 'tag-domain', textCls: 'domain' },
+}
+
+// 把累积文本按【定名】【展开】【详解】【例句】【译文】切段
+function parseSections(raw) {
+  const marks = []
+  const re = /【(定名|展开|详解|例句|译文)】/g
+  let m
+  while ((m = re.exec(raw))) marks.push({ key: m[1], index: m.index, end: re.lastIndex })
+  return marks.map((mark, i) => ({
+    key: mark.key,
+    text: raw.slice(mark.end, i + 1 < marks.length ? marks[i + 1].index : undefined),
+  }))
+}
+
+// 去掉段尾的半截标记（流式中途可能只收到「【定」）
+function trimIncomplete(text) {
+  return (text || '').replace(/【[^】]*$/, '').trim()
+}
+
+// 分段数组 → {定名, 展开, 详解, 例句, 译文}
+const sectionMap = computed(() => {
+  const map = {}
+  for (const s of llmSections.value) map[s.key] = trimIncomplete(s.text)
+  return map
+})
+
+// 可见板块（「无」/ 空内容不显示；例句与译文合并为一个板块）
+const visibleSections = computed(() => {
+  const map = sectionMap.value
+  const out = []
+  for (const key of ['定名', '展开', '详解']) {
+    if (key in map && map[key] && map[key] !== '无') {
+      out.push({ key, ...SECTION_META[key], text: map[key] })
+    }
+  }
+  const en = map['例句'], zh = map['译文']
+  const showEn = en && en !== '无', showZh = zh && zh !== '无'
+  if ('例句' in map && (showEn || showZh || llmStreaming.value)) {
+    out.push({
+      key: '例句', label: '领域例句', tagCls: 'tag-example',
+      textCls: 'llm-example-text', text: showEn ? en : '', zh: showZh ? zh : '',
+    })
+  }
+  return out
+})
+
+function quickSearch(w) {
+  keyword.value = w
+  doSearch()
+}
+
+function doSearch() {
+  const kw = keyword.value.trim()
+  if (!kw) return
+  currentWord.value = kw
+  searched.value = true
+  favSaved.value = false
+  fetchDict(kw)
+  streamTranslate(kw)
+}
+
+/* ---------- 左栏：查词典 ---------- */
+async function fetchDict(word) {
+  dictLoading.value = true
+  dict.value = null
+  dictError.value = ''
+  try {
+    dict.value = await lookupDictionary(word)
+  } catch (e) {
+    dictError.value = e.message || '词典查询失败'
+  } finally {
+    dictLoading.value = false
+  }
+}
+
+/* ---------- 右栏：SSE 流式翻译（fetch + ReadableStream 逐行读） ---------- */
+async function streamTranslate(word) {
+  abortCtrl?.abort()             // 打断上一次未完成的流
+  abortCtrl = new AbortController()
+  llmSections.value = []
+  llmError.value = ''
+  llmStreaming.value = true
+  streamDone.value = false
+  let raw = ''
+  try {
+    const resp = await fetch(`/api/translate/${encodeURIComponent(word)}`, {
+      signal: abortCtrl.signal,
+    })
+    if (!resp.ok) {              // 400 未配置 / 其他 HTTP 错误
+      const data = await resp.json().catch(() => ({}))
+      throw new Error(data.detail || `翻译请求失败 (${resp.status})`)
+    }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const events = buf.split('\n\n')
+      buf = events.pop()         // 最后一段可能不完整，留给下一轮
+      for (const ev of events) {
+        const line = ev.trim()
+        if (!line.startsWith('data:')) continue
+        const payload = line.slice(5).trim()
+        if (payload === '[DONE]') continue
+        let obj
+        try { obj = JSON.parse(payload) } catch { continue }
+        if (obj.error) throw new Error(obj.error)   // 后端兜底转来的错误事件
+        const delta = obj.choices?.[0]?.delta?.content || ''
+        if (delta) {
+          raw += delta
+          llmSections.value = parseSections(raw)
+        }
+      }
+    }
+    streamDone.value = true
+  } catch (e) {
+    if (e.name === 'AbortError') return   // 被新搜索打断，静默
+    llmError.value = e.message || '翻译失败'
+  } finally {
+    llmStreaming.value = false
+  }
+}
+
+/* ---------- 重新生成（只重跑大模型，左栏词典不动） ---------- */
+function doRegen() {
+  favSaved.value = false
+  streamTranslate(currentWord.value)
+}
+
+/* ---------- 收藏入词库（映射规则见 MVP.md §8） ---------- */
+function clean(text) {
+  return !text || text === '无' ? '' : text
+}
+
+async function doFav() {
+  const map = sectionMap.value
+  // 例句：词典双语在前，LLM 领域例句在后
+  const examples = dict.value?.found ? [...dict.value.examples] : []
+  const en = clean(map['例句'])
+  if (en) examples.push({ en, zh: clean(map['译文']) })
+
+  const cnTerm = clean(map['定名'])
+  const payload = {
+    abbreviation: currentWord.value,
+    full_name: clean(map['展开']),
+    cn_term: cnTerm,
+    // 定名预填我的理解（可后续在详情页修改）；无译名时用详解截取兜底（必填字段）
+    my_meaning: cnTerm || clean(map['详解']).slice(0, 50) || '待补充',
+    domain_detail: clean(map['详解']),
+    api_meaning: dict.value?.found ? dict.value.api_meaning : '',
+    phonetic_uk: dict.value?.found ? dict.value.phonetic_uk : '',
+    phonetic_us: dict.value?.found ? dict.value.phonetic_us : '',
+    examples,
+  }
+  favSaving.value = true
+  try {
+    await createWord(payload)
+    favSaved.value = true
+    toast(`已收藏「${currentWord.value}」`, 'success')
+  } catch (e) {
+    toast(e.message || '收藏失败', 'error')   // 词条已存在时后端返回明确提示
+  } finally {
+    favSaving.value = false
+  }
+}
+</script>
