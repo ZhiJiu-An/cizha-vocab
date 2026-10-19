@@ -1,4 +1,4 @@
-"""请求 / 响应模型 (v0.5)"""
+"""请求 / 响应模型 (v0.6)"""
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List
@@ -111,3 +111,35 @@ class ReviewWordItem(WordResponse):
 class ReviewDueResponse(BaseModel):
     total_due: int
     items: List[ReviewWordItem]
+
+
+# ========== 学习统计 ==========
+class StatsTotals(BaseModel):
+    total_words: int = 0                 # 累计词条数
+    week_new: int = 0                    # 近 7 天新增
+    total_reviews: int = 0               # 累计复习打卡次数
+    reviewed_today: int = 0              # 今日已复习（distinct word_id）
+
+
+class TagDistItem(BaseModel):
+    name: str
+    count: int
+
+
+class DailyTrendItem(BaseModel):
+    date: str                            # MM-DD
+    new_words: int = 0                   # 当日新增词条数
+    reviews: int = 0                     # 当日复习打卡次数
+
+
+class StageDistItem(BaseModel):
+    stage: int                           # 档位 0~5
+    days: int                            # 对应间隔天数 [1,2,4,7,15,30]
+    count: int = 0                       # 该档词条数
+
+
+class StatsSummary(BaseModel):
+    totals: StatsTotals
+    tag_distribution: List[TagDistItem]
+    daily_trend: List[DailyTrendItem]
+    stage_distribution: List[StageDistItem]
