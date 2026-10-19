@@ -11,6 +11,7 @@ const routes = [
   { path: '/words/:id', name: 'Detail', component: () => import('../views/WordDetail.vue') },
   { path: '/tags', name: 'Tags', component: () => import('../views/TagList.vue') },
   { path: '/review', name: 'Review', component: () => import('../views/Review.vue') },
+  { path: '/stats', name: 'Stats', component: () => import('../views/Stats.vue') },
 ]
 
 const router = createRouter({
