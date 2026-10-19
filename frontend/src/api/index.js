@@ -63,3 +63,9 @@ export const submitReviewAnswer = (wordId, result) =>
 
 /* ========= 学习统计 ========= */
 export const getStatsSummary = () => api.get('/stats/summary').then((r) => r.data)
+
+/* ========= 大模型配置 ========= */
+export const getLlmConfig = () => api.get('/llm/config').then((r) => r.data)
+export const saveLlmConfig = (data) => api.put('/llm/config', data).then((r) => r.data)
+export const testLlmConfig = (data) => api.post('/llm/test', data).then((r) => r.data)
+export const resetLlmConfig = () => api.delete('/llm/config').then((r) => r.data)

@@ -6,11 +6,12 @@
 不泄漏为 500，保证前端能正常收尾。
 """
 import json
-import os
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+
+from ..config import get_llm_config
 
 router = APIRouter(prefix="/api/translate", tags=["大模型翻译"])
 
@@ -26,16 +27,6 @@ PROMPT_TMPL = """你是面向大模型/AI 工程师的术语翻译助手，翻�
 【译文】例句的中文翻译"""
 
 
-def _llm_config():
-    """读取环境变量配置；任一缺失返回 None"""
-    base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
-    api_key = os.environ.get("LLM_API_KEY", "")
-    model = os.environ.get("LLM_MODEL", "")
-    if not (base_url and api_key and model):
-        return None
-    return base_url, api_key, model
-
-
 def _error_event(message: str) -> str:
     """包装成一条 SSE error 事件"""
     return f"data: {json.dumps({'error': message}, ensure_ascii=False)}\n\n"
@@ -48,11 +39,11 @@ async def translate(word: str):
     if not word:
         raise HTTPException(status_code=400, detail="单词不能为空")
 
-    config = _llm_config()
+    config = get_llm_config()
     if not config:
         raise HTTPException(
             status_code=400,
-            detail="大模型未配置：请设置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 环境变量后重启服务",
+            detail="大模型未配置：请在「设置」页填入模型信息，或设置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 环境变量",
         )
     base_url, api_key, model = config
 
