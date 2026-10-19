@@ -1,4 +1,4 @@
-"""请求 / 响应模型 (v0.6)"""
+"""请求 / 响应模型 (v0.7)"""
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List
@@ -143,3 +143,15 @@ class StatsSummary(BaseModel):
     tag_distribution: List[TagDistItem]
     daily_trend: List[DailyTrendItem]
     stage_distribution: List[StageDistItem]
+
+
+# ========== 图片取词 ==========
+class OcrWordItem(BaseModel):
+    word: str                            # 识别出的单词 / 短语
+    zh: str = ""                         # 中文意思（模型附带，便于用户挑选）
+    in_library: bool = False             # 是否已在词库中（前端标灰显示「已收藏」）
+
+
+class OcrExtractResponse(BaseModel):
+    total: int
+    words: List[OcrWordItem]
