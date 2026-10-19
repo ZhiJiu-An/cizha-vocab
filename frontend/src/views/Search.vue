@@ -23,26 +23,55 @@
       </div>
 
       <!-- ===== 图片取词候选（上传/粘贴截图后出现，点击填入搜索框并自动查询）===== -->
-      <div v-if="ocrLoading || ocrError || ocrWords.length" class="ocr-panel">
-        <div v-if="ocrLoading" class="ocr-hint">📷 正在识别图片中的术语…</div>
+      <div v-if="ocrLoading || ocrError || ocrOriginal || ocrWords.length" class="ocr-panel">
+        <div v-if="ocrLoading" class="ocr-hint">📷 正在识别图片中的文字…</div>
         <div v-else-if="ocrError" class="ocr-hint err">⚠️ {{ ocrError }}</div>
         <template v-else>
-          <div class="ocr-hint">
-            识别到 {{ ocrWords.length }} 个术语，点击直接查询 👇
+          <!-- 原文已自动填入搜索框；这里展示译文 -->
+          <div v-if="ocrTranslation" class="ocr-translation">
+            <span class="tr-label">译文</span>
+            <span class="tr-text">{{ ocrTranslation }}</span>
+          </div>
+          <div v-if="ocrWords.length" class="ocr-hint">
+            识别到 {{ ocrWords.length }} 个术语，点击查询 👇
           </div>
           <div class="ocr-chips">
-            <span
-              v-for="w in ocrWords"
-              :key="w.word"
-              class="ocr-chip"
-              :class="{ collected: w.in_library }"
-              :title="w.in_library ? '已在词库中' : `点击查询「${w.word}」`"
-              @click="pickWord(w)"
-            >
-              {{ w.word }}
-              <em v-if="w.zh" class="zh">{{ w.zh }}</em>
-              <i v-if="w.in_library" class="dot-tag">已收藏</i>
-            </span>
+            <template v-for="w in ocrWords" :key="w.word">
+              <!-- 多词短语：整句可点 + 拆出的子词可单独查询 -->
+              <div v-if="isPhrase(w.word)" class="ocr-phrase-block">
+                <span
+                  class="ocr-chip phrase"
+                  :class="{ collected: w.in_library }"
+                  :title="`点击查询整句「${w.word}」`"
+                  @click="pickWord(w)"
+                >
+                  {{ w.word }}
+                  <em v-if="w.zh" class="zh">{{ w.zh }}</em>
+                  <i v-if="w.in_library" class="dot-tag">已收藏</i>
+                </span>
+                <div class="ocr-subchips">
+                  <span
+                    v-for="sub in splitPhrase(w.word)"
+                    :key="sub"
+                    class="ocr-chip sub"
+                    :title="`查询「${sub}」`"
+                    @click="searchWord(sub)"
+                  >{{ sub }}</span>
+                </div>
+              </div>
+              <!-- 单词：普通 chip -->
+              <span
+                v-else
+                class="ocr-chip"
+                :class="{ collected: w.in_library }"
+                :title="w.in_library ? '已在词库中' : `点击查询「${w.word}」`"
+                @click="pickWord(w)"
+              >
+                {{ w.word }}
+                <em v-if="w.zh" class="zh">{{ w.zh }}</em>
+                <i v-if="w.in_library" class="dot-tag">已收藏</i>
+              </span>
+            </template>
           </div>
         </template>
       </div>
@@ -162,6 +191,8 @@ const favSaved = ref(false)
 const fileInput = ref(null)
 const ocrLoading = ref(false)
 const ocrError = ref('')
+const ocrOriginal = ref('')      // 图片原文
+const ocrTranslation = ref('')   // 原文翻译
 const ocrWords = ref([])         // [{word, zh, in_library}]
 
 function pickImage() {
@@ -186,11 +217,19 @@ async function runOcr(file) {
   if (!file) return
   ocrLoading.value = true
   ocrError.value = ''
+  ocrOriginal.value = ''
+  ocrTranslation.value = ''
   ocrWords.value = []
   try {
     const res = await extractWordsFromImage(file)
+    ocrOriginal.value = res.original_text || ''
+    ocrTranslation.value = res.translation || ''
     ocrWords.value = res.words || []
-    if (!ocrWords.value.length) ocrError.value = '未识别到术语，换张更清晰的图片试试'
+    // 原文自动填入搜索框，用户可直接查整句
+    if (ocrOriginal.value) keyword.value = ocrOriginal.value
+    if (!ocrWords.value.length && !ocrOriginal.value) {
+      ocrError.value = '未识别到文字，换张更清晰的图片试试'
+    }
   } catch (e) {
     ocrError.value = e.message || '图片识别失败'
   } finally {
@@ -201,6 +240,22 @@ async function runOcr(file) {
 // 点击候选术语：填入搜索框并立即发起双栏查询
 function pickWord(w) {
   keyword.value = w.word
+  doSearch()
+}
+
+// 短语判断：含空格即为多词短语
+function isPhrase(word) {
+  return /\s/.test((word || '').trim())
+}
+
+// 拆分短语为可单独查询的子词：仅按空格切，不拆连字符（如 retrieval-augmented 保留为一体）
+function splitPhrase(word) {
+  return (word || '').trim().split(/\s+/).filter(Boolean)
+}
+
+// 点击短语中的子词：直接查询该词
+function searchWord(text) {
+  keyword.value = text
   doSearch()
 }
 

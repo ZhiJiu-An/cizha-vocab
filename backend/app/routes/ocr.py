@@ -30,14 +30,25 @@ MAX_SIZE = 10 * 1024 * 1024   # 10MB 上限
 MAX_WORDS = 15
 ALLOWED_MIME = ("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp")
 
-# 提取提示词：只出 JSON，便于后端解析
-PROMPT = """请从这张图片中提取出与计算机 / 人工智能 / 大模型领域相关的英文单词或短语。
-要求：
-1. 只提取专业术语、技术名词或领域常见表达，忽略普通词汇、人名、页码等无关文字
-2. 保留图片中的原始拼写，明显识别错误可纠正
-3. 去重后按重要程度排序，最多 15 条
-4. 只输出 JSON 数组，不要任何解释文字或代码块标记
-格式：[{"word": "retrieval-augmented generation", "zh": "检索增强生成"}]"""
+# 提取提示词：返回原文、译文、术语列表，便于前端展示
+PROMPT = """你是一个严格的文字提取器。请识别这张图片中的英文文字，并完成两件事：
+1. 把图片中的英文原文完整抄录出来（保留原始拼写）
+2. 把原文翻译成中文
+3. 从原文中挑出与计算机 / 人工智能 / 大模型领域相关的单词或短语，给出中文意思
+
+硬性规则：
+- 每个术语都必须是原文里真实出现的，禁止编造、禁止联想
+- 忽略普通词汇（and、the、Easy、Efficient 等）、人名、页码、标点
+- 术语去重，按出现顺序排列，最多 15 条
+- 只输出 JSON，不要任何解释或代码块标记
+
+输出格式：
+{
+  "original": "图片中的英文原文",
+  "translation": "原文的中文翻译",
+  "words": [{"word": "LLM", "zh": "大语言模型"}]
+}
+若图片中没有相关术语，words 为空数组"""
 
 
 def _vision_config():
@@ -55,28 +66,31 @@ def _vision_config():
     return base_url, api_key, model
 
 
-def _parse_words(text: str, collected: set) -> list:
-    """从模型输出里解析术语列表：剥掉代码块围栏 → 取首个 JSON 数组 → 清洗去重"""
+def _parse_result(text: str, collected: set):
+    """解析模型输出：剥代码块围栏 → 取 JSON 对象 → 提取 original / translation / words"""
     text = (text or "").strip()
     # 剥掉 ```json ... ``` 之类的围栏
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
 
-    # 只取第一个 [ ... ] 片段，容忍模型加了前后说明
-    start, end = text.find("["), text.rfind("]")
+    # 取第一个 { ... } 对象
+    start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1 or end < start:
-        raise ValueError("模型返回内容中没有 JSON 数组")
+        raise ValueError("模型返回内容中没有 JSON 对象")
     raw = json.loads(text[start:end + 1])
-    if not isinstance(raw, list):
-        raise ValueError("模型返回的 JSON 不是数组")
+    if not isinstance(raw, dict):
+        raise ValueError("模型返回的 JSON 不是对象")
+
+    original = str(raw.get("original") or "").strip()
+    translation = str(raw.get("translation") or "").strip()
 
     words, seen = [], set()
-    for item in raw:
+    for item in raw.get("words") or []:
         if isinstance(item, dict):
             word = str(item.get("word") or "").strip()
             zh = str(item.get("zh") or "").strip()
-        else:                       # 容忍模型直接返回字符串数组
+        else:
             word, zh = str(item).strip(), ""
         key = word.lower()
         if not word or key in seen:
@@ -85,7 +99,7 @@ def _parse_words(text: str, collected: set) -> list:
         words.append(OcrWordItem(word=word, zh=zh, in_library=key in collected))
         if len(words) >= MAX_WORDS:
             break
-    return words
+    return original, translation, words
 
 
 @router.post("/extract", response_model=OcrExtractResponse)
@@ -145,8 +159,9 @@ async def extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
     # ---- 标注已在词库中的术语（前端标灰显示「已收藏」）----
     collected = {a.lower() for (a,) in db.query(Word.abbreviation).all()}
     try:
-        words = _parse_words(content, collected)
+        original, translation, words = _parse_result(content, collected)
     except (ValueError, json.JSONDecodeError) as e:
         raise HTTPException(status_code=502, detail=f"模型返回内容无法解析：{e}")
 
-    return OcrExtractResponse(total=len(words), words=words)
+    return OcrExtractResponse(total=len(words), original_text=original,
+                               translation=translation, words=words)
