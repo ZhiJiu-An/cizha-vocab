@@ -1,0 +1,23 @@
+# 仅用于工具配置（非打包配置）：项目本身是按目录直接运行的 FastAPI 应用。
+# 装了对应工具后即可生效：
+#   pip install ruff && ruff check backend/app backend/tests
+#   pytest backend/tests          （可选；当前测试用 stdlib unittest 编写，无需 pytest）
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+# 与现有代码风格保持一致：不强制把 import 排序改写，避免大面积无意义 diff
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+ignore = [
+    "E501",   # 行宽交给 line-length + formatter，不逐行报错
+    "B008",   # FastAPI 的 Depends()/File()/Query() 作为默认值是标准写法
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
