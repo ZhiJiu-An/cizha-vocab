@@ -671,3 +671,73 @@ body {
 .ds.forget { background: #fee2e2; color: #b91c1c; }
 .done-actions { display: flex; gap: 12px; justify-content: center; }
 .done-actions .btn { text-decoration: none; }
+
+/* ========= 学习统计 (v0.6) ========= */
+.stats-wrap { max-width: 760px; margin: 0 auto; }
+.stats-cards { grid-template-columns: repeat(4, 1fr); }
+.ov-card.accent-primary { border-top-color: var(--primary); }
+.ov-card.accent-primary .ov-num { color: var(--primary); }
+.ov-card.accent-green { border-top-color: var(--green); }
+.ov-card.accent-green .ov-num { color: var(--green); }
+.ov-card.accent-yellow { border-top-color: var(--yellow); }
+.ov-card.accent-yellow .ov-num { color: var(--yellow); }
+
+/* 统计区块 */
+.stat-block {
+  background: var(--card);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 22px 24px;
+  margin-bottom: 18px;
+}
+.sb-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.sb-title { font-size: 15px; font-weight: 700; }
+.stat-block .sb-title { margin-bottom: 14px; }
+.sb-hint { font-size: 12px; color: var(--muted-2); margin-top: 12px; }
+.stat-empty { font-size: 13px; color: var(--muted-2); text-align: center; padding: 14px 0 4px; }
+
+/* 图例 */
+.legend { display: flex; gap: 16px; }
+.lg { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.dot.new { background: var(--primary); }
+.dot.review { background: var(--green); }
+
+/* 近 7 日柱状图 */
+.trend-chart { display: flex; align-items: stretch; gap: 10px; height: 180px; }
+.trend-col { flex: 1; display: flex; flex-direction: column; align-items: center; }
+.trend-bars {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.bar {
+  width: 26px;
+  max-width: 36%;
+  border-radius: 5px 5px 0 0;
+  transition: height .4s;
+}
+.bar.new { background: var(--primary); }
+.bar.review { background: var(--green); }
+.trend-date { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+/* 横向条形（标签分布 / 档位分布） */
+.hbar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.hbar-name {
+  width: 120px;
+  font-size: 13px;
+  text-align: right;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hbar-name.stage-name { width: 112px; font-size: 12.5px; color: var(--muted); }
+.hbar-track { flex: 1; height: 14px; background: var(--border-2); border-radius: 999px; overflow: hidden; }
+.hbar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--primary), #7c3aed); transition: width .4s; }
+.hbar-fill.stage { background: linear-gradient(90deg, var(--green), #34d399); }
+.hbar-num { width: 32px; font-size: 13px; font-weight: 600; color: var(--muted); }

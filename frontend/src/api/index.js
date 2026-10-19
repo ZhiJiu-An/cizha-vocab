@@ -47,3 +47,6 @@ export const getReviewOverview = () => api.get('/review/overview').then((r) => r
 export const getDueWords = (params = {}) => api.get('/review/due', { params }).then((r) => r.data)
 export const submitReviewAnswer = (wordId, result) =>
   api.post(`/review/${wordId}/answer`, { result }).then((r) => r.data)
+
+/* ========= 学习统计 ========= */
+export const getStatsSummary = () => api.get('/stats/summary').then((r) => r.data)
