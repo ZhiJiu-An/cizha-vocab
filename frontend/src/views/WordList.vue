@@ -37,30 +37,23 @@
 
     <div v-else-if="words.length" class="cards">
       <div
-        v-for="w in words"
+        v-for="w in displayWords"
         :key="w.id"
         class="card"
-        :class="cardType(w).cls"
+        :class="w._type.cls"
         @click="router.push(`/words/${w.id}`)"
       >
         <div class="card-head">
           <span class="card-abbr">
             {{ w.abbreviation }}
-            <span class="badge" :class="cardType(w).badge">{{ cardType(w).text }}</span>
+            <WordBadge :type="w._type" />
           </span>
 
           <!-- 中文定名 chip 紧跟主词 -->
           <span v-if="w.cn_term" class="card-cn">{{ w.cn_term }}</span>
 
           <!-- 音标紧跟主词 -->
-          <div v-if="w.phonetic_uk || w.phonetic_us" class="card-phos">
-            <span v-if="w.phonetic_uk" class="card-phonetic">
-              <span class="pho-tag uk">UK</span>{{ w.phonetic_uk }}
-            </span>
-            <span v-if="w.phonetic_us && w.phonetic_us !== w.phonetic_uk" class="card-phonetic">
-              <span class="pho-tag us">US</span>{{ w.phonetic_us }}
-            </span>
-          </div>
+          <Phonetics :uk="w.phonetic_uk" :us="w.phonetic_us" />
 
           <span v-if="w.full_name" class="card-full">{{ w.full_name }}</span>
           <span class="card-spacer"></span>
@@ -99,6 +92,13 @@
       <p>{{ keyword || activeTag ? '没有匹配的词条' : '还没有词条，点右上角「新建」开始记录' }}</p>
     </div>
 
+    <!-- 分页（P1-4）：旧版只渲染前 200 条却把总数显示成全量，超出的词条看不见 -->
+    <div v-if="!loading && words.length < total" style="text-align: center; margin: 22px 0 8px">
+      <button class="btn btn-outline" :disabled="loadingMore" @click="loadWords({ append: true })">
+        {{ loadingMore ? '加载中…' : `加载更多（已显示 ${words.length} / ${total}）` }}
+      </button>
+    </div>
+
     <!-- 删除确认 -->
     <div v-if="pendingDelete" class="modal-mask" @click.self="pendingDelete = null">
       <div class="modal">
@@ -116,8 +116,10 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import Phonetics from '../components/Phonetics.vue'
+import WordBadge from '../components/WordBadge.vue'
 import { batchImport, deleteWord, exportCsvUrl, listTags, listWords } from '../api'
 import { cardType, parseTags, relativeTime, toast } from '../utils'
 
@@ -131,23 +133,42 @@ const keyword = ref(route.query.keyword || '')
 const activeTag = ref(route.query.tag || '')
 const sort = ref('time_desc')
 const loading = ref(false)
+const loadingMore = ref(false)
 const pendingDelete = ref(null)
 const fileInput = ref(null)
 
-async function loadWords() {
-  loading.value = true
+const PAGE_SIZE = 60            // 每页条数（后端上限 500）
+let listSeq = 0                 // 请求序号：丢弃过期的列表响应，避免旧页覆盖新页
+
+// 每张卡片的类型只算一次（P2-5）：原来模板里 cardType(w) 被调了 3 次
+const displayWords = computed(() =>
+  words.value.map((w) => ({ ...w, _type: cardType(w) })),
+)
+
+// append=true 追加下一页；否则从头加载（搜索 / 筛选 / 排序变化时）
+async function loadWords({ append = false } = {}) {
+  const seq = ++listSeq
+  if (append) loadingMore.value = true
+  else loading.value = true
   try {
     const data = await listWords({
       keyword: keyword.value,
       tag: activeTag.value,
       sort: sort.value,
+      skip: append ? words.value.length : 0,
+      limit: PAGE_SIZE,
     })
-    words.value = data.items
+    if (seq !== listSeq) return          // 已有更新的请求在跑
+    words.value = append ? [...words.value, ...data.items] : data.items
     total.value = data.total
   } catch (e) {
+    if (seq !== listSeq) return
     toast(e.message, 'error')
   } finally {
-    loading.value = false
+    if (seq === listSeq) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
@@ -168,9 +189,10 @@ function selectTag(name) {
 let debounceTimer
 watch(keyword, () => {
   clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(loadWords, 300)
+  debounceTimer = setTimeout(() => loadWords(), 300)
 })
-watch(sort, loadWords)
+// 用箭头包一层：watch 回调会传 (newVal, oldVal)，直接传 loadWords 会被当成参数解构
+watch(sort, () => loadWords())
 
 // 从「标签」页带 ?tag=xxx 跳转过来时同步筛选
 watch(
@@ -201,6 +223,7 @@ function doExport() {
 }
 
 function triggerImport() {
+  if (!fileInput.value) return
   fileInput.value.value = ''
   fileInput.value.click()
 }

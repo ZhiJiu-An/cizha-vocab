@@ -12,16 +12,9 @@
         <span class="card-abbr">
           {{ word.abbreviation }}
           <span v-if="word.cn_term" class="card-cn">{{ word.cn_term }}</span>
-          <span class="badge" :class="cardType(word).badge">{{ cardType(word).text }}</span>
+          <WordBadge :type="wordType" />
         </span>
-        <div v-if="word.phonetic_uk || word.phonetic_us" class="card-phos">
-          <span v-if="word.phonetic_uk" class="card-phonetic">
-            <span class="pho-tag uk">UK</span>{{ word.phonetic_uk }}
-          </span>
-          <span v-if="word.phonetic_us && word.phonetic_us !== word.phonetic_uk" class="card-phonetic">
-            <span class="pho-tag us">US</span>{{ word.phonetic_us }}
-          </span>
-        </div>
+        <Phonetics :uk="word.phonetic_uk" :us="word.phonetic_us" />
       </div>
 
       <div v-if="word.full_name" class="detail-block">
@@ -44,11 +37,11 @@
         <div class="v">{{ word.domain_detail }}</div>
       </div>
 
-      <div v-if="word.examples && word.examples.length" class="detail-block">
+      <div v-if="examples.length" class="detail-block">
         <div class="k">例句</div>
-        <div v-for="(ex, i) in word.examples" :key="i" class="v dict-example">
-          · {{ exampleText(ex).en }}
-          <span v-if="exampleText(ex).zh" class="zh">{{ exampleText(ex).zh }}</span>
+        <div v-for="(ex, i) in examples" :key="i" class="v dict-example">
+          · {{ ex.en }}
+          <span v-if="ex.zh" class="zh">{{ ex.zh }}</span>
         </div>
       </div>
 
@@ -120,8 +113,10 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import Phonetics from '../components/Phonetics.vue'
+import WordBadge from '../components/WordBadge.vue'
 import { deleteWord, getWord } from '../api'
 import { cardType, parseTags, relativeTime, toast } from '../utils'
 
@@ -132,7 +127,11 @@ const word = ref(null)
 const loading = ref(true)
 const showConfirm = ref(false)
 
-// 例句兼容：v0.4 为 {en, zh} 对象，旧数据可能仍是纯字符串
+// 例句兼容：v0.4 为 {en, zh} 对象，旧数据可能仍是纯字符串。
+// 一次性归一成数组后模板直接用，避免每条例句渲染时重复调用（P2-5）
+const examples = computed(() => (word.value?.examples || []).map(exampleText))
+const wordType = computed(() => cardType(word.value || {}))
+
 function exampleText(ex) {
   if (ex && typeof ex === 'object') return { en: ex.en || '', zh: ex.zh || '' }
   return { en: String(ex ?? ''), zh: '' }

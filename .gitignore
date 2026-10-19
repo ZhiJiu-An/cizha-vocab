@@ -10,6 +10,9 @@ venv/
 *.db-journal
 *.sqlite3
 
+# 后端运行时数据目录：含 SQLite 与 llm_config.json（后者写入明文 API Key，绝不能入库）
+backend/data/
+
 # 环境变量 / 密钥
 .env
 .env.*

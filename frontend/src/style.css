@@ -18,6 +18,15 @@
   --danger: #ef4444;
   --shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, .08);
+
+  /* ---- 别名（P1-1）----
+     设置页等较新的代码沿用了下面这套命名，但上面只有 --card / --muted / --shadow。
+     缺别名时 var(--card-bg) 之类会整条声明失效（卡片背景透明、无阴影、次要文字无色），
+     这里统一补上，避免同一个语义出现两套变量名。 */
+  --card-bg: var(--card);
+  --text-light: var(--muted);
+  --shadow-sm: var(--shadow);
+  --bg-soft: #f8fafc;
 }
 
 body {
@@ -546,6 +555,8 @@ body {
 /* 词典面板 */
 .dict-word-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .dict-word { font-size: 26px; font-weight: 700; }
+/* 词典栏的音标容器（P2-5）：供 Phonetics 组件统一使用，间距比卡片里更宽 */
+.dict-phos { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .dict-phonetic { font-size: 13px; color: var(--muted-2); font-family: 'Courier New', monospace; }
 .dict-section { margin-bottom: 14px; }
 .dict-label {
@@ -747,6 +758,8 @@ body {
   gap: 8px;
 }
 .btn-ans:hover { transform: translateY(-1px); filter: brightness(1.05); }
+/* 提交中禁用态：避免重复点击导致重复打卡（P0-4） */
+.btn-ans:disabled { opacity: .55; cursor: not-allowed; transform: none; filter: none; }
 .btn-ans.forget { background: var(--danger); }
 .btn-ans.fuzzy { background: var(--yellow); }
 .btn-ans.remember { background: var(--green); }
