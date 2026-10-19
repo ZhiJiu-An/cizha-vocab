@@ -42,6 +42,19 @@ export const exportCsvUrl = (params = {}) => {
 export const lookupDictionary = (word) =>
   api.get(`/dictionary/${encodeURIComponent(word)}`).then((r) => r.data)
 
+/* ========= 图片取词 ========= */
+export const extractWordsFromImage = (file) => {
+  const form = new FormData()
+  form.append('file', file)
+  // 视觉模型响应较慢，单独放宽超时（实例默认 15s）
+  return api
+    .post('/ocr/extract', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    })
+    .then((r) => r.data)
+}
+
 /* ========= 记忆复习 ========= */
 export const getReviewOverview = () => api.get('/review/overview').then((r) => r.data)
 export const getDueWords = (params = {}) => api.get('/review/due', { params }).then((r) => r.data)

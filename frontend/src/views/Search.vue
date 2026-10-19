@@ -9,11 +9,42 @@
           placeholder="输入单词、短语或领域缩写，如 token / chain of thought / RAG ..."
           autofocus
           @keydown.enter="doSearch"
+          @paste="onPaste"
         >
+        <button class="ocr-btn" :disabled="ocrLoading" @click="pickImage">
+          {{ ocrLoading ? '识别中…' : '📷 图片取词' }}
+        </button>
         <button @click="doSearch">搜索</button>
+        <!-- 隐藏的文件选择器：图片取词用 -->
+        <input ref="fileInput" type="file" accept="image/*" class="ocr-file" @change="onFileChange">
       </div>
       <div class="quick-words">
         <span v-for="w in quickWords" :key="w" @click="quickSearch(w)">{{ w }}</span>
+      </div>
+
+      <!-- ===== 图片取词候选（上传/粘贴截图后出现，点击填入搜索框并自动查询）===== -->
+      <div v-if="ocrLoading || ocrError || ocrWords.length" class="ocr-panel">
+        <div v-if="ocrLoading" class="ocr-hint">📷 正在识别图片中的术语…</div>
+        <div v-else-if="ocrError" class="ocr-hint err">⚠️ {{ ocrError }}</div>
+        <template v-else>
+          <div class="ocr-hint">
+            识别到 {{ ocrWords.length }} 个术语，点击直接查询 👇
+          </div>
+          <div class="ocr-chips">
+            <span
+              v-for="w in ocrWords"
+              :key="w.word"
+              class="ocr-chip"
+              :class="{ collected: w.in_library }"
+              :title="w.in_library ? '已在词库中' : `点击查询「${w.word}」`"
+              @click="pickWord(w)"
+            >
+              {{ w.word }}
+              <em v-if="w.zh" class="zh">{{ w.zh }}</em>
+              <i v-if="w.in_library" class="dot-tag">已收藏</i>
+            </span>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -102,7 +133,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { lookupDictionary, createWord } from '../api'
+import { lookupDictionary, createWord, extractWordsFromImage } from '../api'
 import { toast } from '../utils'
 
 const quickWords = ['token', 'RAG', 'attention', 'chain of thought']
@@ -126,6 +157,52 @@ let abortCtrl = null             // 中断上一次未完成的 SSE
 /* ========= 收藏 ========= */
 const favSaving = ref(false)
 const favSaved = ref(false)
+
+/* ========= 图片取词（v0.7）========= */
+const fileInput = ref(null)
+const ocrLoading = ref(false)
+const ocrError = ref('')
+const ocrWords = ref([])         // [{word, zh, in_library}]
+
+function pickImage() {
+  fileInput.value?.click()
+}
+
+function onFileChange(e) {
+  const file = e.target.files?.[0]
+  if (file) runOcr(file)
+  e.target.value = ''            // 清空以便重复选择同一张图
+}
+
+// 截图工具截完即在剪贴板，Ctrl+V 直接识别（主入口）
+function onPaste(e) {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'))
+  if (!item) return              // 非图片粘贴不拦截，不影响正常粘贴文字
+  e.preventDefault()
+  runOcr(item.getAsFile())
+}
+
+async function runOcr(file) {
+  if (!file) return
+  ocrLoading.value = true
+  ocrError.value = ''
+  ocrWords.value = []
+  try {
+    const res = await extractWordsFromImage(file)
+    ocrWords.value = res.words || []
+    if (!ocrWords.value.length) ocrError.value = '未识别到术语，换张更清晰的图片试试'
+  } catch (e) {
+    ocrError.value = e.message || '图片识别失败'
+  } finally {
+    ocrLoading.value = false
+  }
+}
+
+// 点击候选术语：填入搜索框并立即发起双栏查询
+function pickWord(w) {
+  keyword.value = w.word
+  doSearch()
+}
 
 // 五段标记 → 板块映射（「无」的板块不显示）
 const SECTION_META = {

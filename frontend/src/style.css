@@ -407,6 +407,61 @@ body {
 }
 .quick-words span:hover { color: var(--primary); transform: translateY(-1px); }
 
+/* ========= 图片取词 (v0.7) ========= */
+/* 搜索框内的次要按钮：位于主「搜索」按钮左侧 */
+.search-box .ocr-btn {
+  padding: 0 20px;
+  background: #fff;
+  color: var(--primary);
+  border-left: 1px solid var(--border);
+  white-space: nowrap;
+}
+.search-box .ocr-btn:hover:not(:disabled) { background: #eef2ff; }
+.search-box .ocr-btn:disabled { color: var(--muted-2); cursor: default; }
+/* 隐藏的原生文件选择器 */
+.ocr-file { display: none; }
+
+/* 候选术语区 */
+.ocr-panel {
+  margin-top: 14px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 14px 18px;
+}
+.ocr-hint { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+.ocr-hint.err { color: var(--danger); margin-bottom: 0; }
+.ocr-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ocr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-dark);
+  background: #eef2ff;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.ocr-chip:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.ocr-chip .zh {
+  font-size: 11.5px;
+  font-weight: 400;
+  font-style: normal;
+  color: var(--muted);
+}
+.ocr-chip.collected { background: var(--border-2); color: var(--muted); }
+.ocr-chip .dot-tag {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--green);
+  background: #fff;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
 /* 双栏结果区：宽屏并排，窄屏堆叠 */
 .result-grid {
   max-width: 1080px;
