@@ -12,6 +12,7 @@ const routes = [
   { path: '/tags', name: 'Tags', component: () => import('../views/TagList.vue') },
   { path: '/review', name: 'Review', component: () => import('../views/Review.vue') },
   { path: '/stats', name: 'Stats', component: () => import('../views/Stats.vue') },
+  { path: '/settings', name: 'Settings', component: () => import('../views/Settings.vue') },
 ]
 
 const router = createRouter({

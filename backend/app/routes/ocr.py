@@ -12,13 +12,13 @@ DeepSeek 官方 API 无视觉模型，故支持独立端点以便接任意 OpenA
 """
 import base64
 import json
-import os
 import re
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from ..config import get_vision_config
 from ..database import get_db
 from ..models import Word
 from ..schemas import OcrExtractResponse, OcrWordItem
@@ -49,21 +49,6 @@ PROMPT = """你是一个严格的文字提取器。请识别这张图片中的�
   "words": [{"word": "LLM", "zh": "大语言模型"}]
 }
 若图片中没有相关术语，words 为空数组"""
-
-
-def _vision_config():
-    """读取视觉模型配置；model 缺失返回 None（base/key 可回落到通用 LLM 配置）"""
-    base_url = os.environ.get("LLM_VISION_BASE_URL", "").strip().rstrip("/")
-    api_key = os.environ.get("LLM_VISION_API_KEY", "").strip()
-    model = os.environ.get("LLM_VISION_MODEL", "").strip()
-
-    # 未单独配置视觉端点时，回落到 v0.4 的通用 LLM 配置
-    base_url = base_url or os.environ.get("LLM_BASE_URL", "").strip().rstrip("/")
-    api_key = api_key or os.environ.get("LLM_API_KEY", "").strip()
-
-    if not (base_url and api_key and model):
-        return None
-    return base_url, api_key, model
 
 
 def _parse_result(text: str, collected: set):
@@ -116,7 +101,7 @@ async def extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if len(data) > MAX_SIZE:
         raise HTTPException(status_code=400, detail="图片过大，请压缩到 10MB 以内")
 
-    config = _vision_config()
+    config = get_vision_config()
     if not config:
         raise HTTPException(
             status_code=400,

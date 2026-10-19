@@ -45,6 +45,7 @@ const navItems = [
   { path: '/tags', icon: '🏷️', title: '标签' },
   { path: '/review', icon: '🧠', title: '复习' },
   { path: '/stats', icon: '📊', title: '统计' },
+  { path: '/settings', icon: '⚙️', title: '设置' },
 ]
 
 // 「首页」需精确匹配；其余前缀匹配，使详情/编辑页仍高亮「词库」
