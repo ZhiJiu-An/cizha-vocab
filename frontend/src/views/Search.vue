@@ -103,15 +103,12 @@
             <template v-else-if="dict">
               <div class="dict-word-row">
                 <span class="dict-word">{{ dict.word }}</span>
-                <span v-if="dict.phonetic_uk" class="dict-phonetic">
-                  <span class="pho-tag uk">UK</span>{{ dict.phonetic_uk }}
-                </span>
-                <span
-                  v-if="dict.phonetic_us && dict.phonetic_us !== dict.phonetic_uk"
-                  class="dict-phonetic"
-                >
-                  <span class="pho-tag us">US</span>{{ dict.phonetic_us }}
-                </span>
+                <Phonetics
+                  :uk="dict.phonetic_uk"
+                  :us="dict.phonetic_us"
+                  wrapper-class="dict-phos"
+                  item-class="dict-phonetic"
+                />
               </div>
               <div v-if="dict.api_meaning" class="dict-section">
                 <div class="dict-label">释义</div>
@@ -162,6 +159,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import Phonetics from '../components/Phonetics.vue'
 import { lookupDictionary, createWord, extractWordsFromImage } from '../api'
 import { toast } from '../utils'
 
@@ -182,6 +180,13 @@ const llmStreaming = ref(false)
 const llmError = ref('')
 const streamDone = ref(false)    // 流正常结束（出现收藏栏）
 let abortCtrl = null             // 中断上一次未完成的 SSE
+
+/* 请求序号（P1-2 / P1-3）
+   快速连搜 / 点「重新生成」时，旧请求的响应（以及它的 catch / finally）会晚于新请求
+   落地，把新请求刚写好的状态覆盖掉 —— 典型症状是流式光标莫名消失、或被上一轮的
+   错误信息顶掉。做法：每发起一次就自增序号，异步落地时序号不再是「当前」就整段丢弃。 */
+let dictSeq = 0
+let llmSeq = 0
 
 /* ========= 收藏 ========= */
 const favSaving = ref(false)
@@ -327,15 +332,19 @@ function doSearch() {
 
 /* ---------- 左栏：查词典 ---------- */
 async function fetchDict(word) {
+  const seq = ++dictSeq
   dictLoading.value = true
   dict.value = null
   dictError.value = ''
   try {
-    dict.value = await lookupDictionary(word)
+    const data = await lookupDictionary(word)
+    if (seq !== dictSeq) return          // 已被更新的查询取代（P1-3）
+    dict.value = data
   } catch (e) {
+    if (seq !== dictSeq) return
     dictError.value = e.message || '词典查询失败'
   } finally {
-    dictLoading.value = false
+    if (seq === dictSeq) dictLoading.value = false
   }
 }
 
@@ -343,6 +352,7 @@ async function fetchDict(word) {
 async function streamTranslate(word) {
   abortCtrl?.abort()             // 打断上一次未完成的流
   abortCtrl = new AbortController()
+  const seq = ++llmSeq
   llmSections.value = []
   llmError.value = ''
   llmStreaming.value = true
@@ -362,6 +372,7 @@ async function streamTranslate(word) {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
+      if (seq !== llmSeq) return   // 已被新请求取代，停止写入（P1-2）
       buf += decoder.decode(value, { stream: true })
       const events = buf.split('\n\n')
       buf = events.pop()         // 最后一段可能不完整，留给下一轮
@@ -380,12 +391,14 @@ async function streamTranslate(word) {
         }
       }
     }
-    streamDone.value = true
+    if (seq === llmSeq) streamDone.value = true
   } catch (e) {
-    if (e.name === 'AbortError') return   // 被新搜索打断，静默
+    // 被新搜索打断（AbortError）或已过期：静默丢弃
+    if (e.name === 'AbortError' || seq !== llmSeq) return
     llmError.value = e.message || '翻译失败'
   } finally {
-    llmStreaming.value = false
+    // 只有「当前」请求才能收尾。旧请求在这里无条件置 false 会掐掉新请求的流式光标（P1-2）
+    if (seq === llmSeq) llmStreaming.value = false
   }
 }
 

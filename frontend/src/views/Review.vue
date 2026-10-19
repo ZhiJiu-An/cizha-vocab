@@ -70,11 +70,15 @@
           <div class="flip-face flip-front">
             <div class="ff-abbr">{{ currentWord.abbreviation }}</div>
             <div v-if="currentWord.full_name" class="ff-full">{{ currentWord.full_name }}</div>
-            <div class="card-phos ff-phos">
-              <span v-if="showUk" class="card-phonetic"><span class="pho-tag uk">英</span>{{ currentWord.phonetic_uk }}</span>
-              <span v-if="showUs" class="card-phonetic"><span class="pho-tag us">美</span>{{ currentWord.phonetic_us }}</span>
-            </div>
-            <span class="badge" :class="typeInfo.badge">{{ typeInfo.text }}</span>
+            <Phonetics
+              class="ff-phos"
+              :uk="currentWord.phonetic_uk"
+              :us="currentWord.phonetic_us"
+              uk-label="英"
+              us-label="美"
+              always-show
+            />
+            <WordBadge :type="typeInfo" />
             <div class="flip-hint">点击卡片或按空格翻面</div>
           </div>
 
@@ -96,9 +100,9 @@
             </div>
             <!-- 三档自评按钮 -->
             <div class="answer-btns">
-              <button class="btn-ans forget" @click="answer('forget')">忘记 <kbd>1</kbd></button>
-              <button class="btn-ans fuzzy" @click="answer('fuzzy')">模糊 <kbd>2</kbd></button>
-              <button class="btn-ans remember" @click="answer('remember')">记住 <kbd>3</kbd></button>
+              <button class="btn-ans forget" :disabled="submitting" @click="answer('forget')">忘记 <kbd>1</kbd></button>
+              <button class="btn-ans fuzzy" :disabled="submitting" @click="answer('fuzzy')">模糊 <kbd>2</kbd></button>
+              <button class="btn-ans remember" :disabled="submitting" @click="answer('remember')">记住 <kbd>3</kbd></button>
             </div>
           </div>
         </div>
@@ -126,6 +130,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import Phonetics from '../components/Phonetics.vue'
+import WordBadge from '../components/WordBadge.vue'
 import { getReviewOverview, getDueWords, submitReviewAnswer, listTags } from '../api'
 import { toast, parseTags, cardType } from '../utils'
 
@@ -138,18 +144,14 @@ const count = ref(20)
 const queue = ref([])                // 本组词条队列
 const currentIndex = ref(0)
 const flipped = ref(false)
+const submitting = ref(false)         // 防重入：双击「记住」/ 连按快捷键只提交一次
 const stats = ref({ remember: 0, fuzzy: 0, forget: 0 })
 
 const currentWord = computed(() => queue.value[currentIndex.value] || {})
 const typeInfo = computed(() => cardType(currentWord.value))
 const wordTags = computed(() => parseTags(currentWord.value.tags))
 
-// 英美音标展示规则：不同则并列，相同只显示一次，无则不显示
-const showUk = computed(() => !!currentWord.value.phonetic_uk)
-const showUs = computed(() => {
-  const { phonetic_uk: uk, phonetic_us: us } = currentWord.value
-  return !!us && us !== uk
-})
+// 英美音标的「相同只显示一次」规则已收进 Phonetics 组件（P2-5），这里不再重复判断
 
 async function loadReady() {
   try {
@@ -204,8 +206,10 @@ async function start() {
 }
 
 async function answer(result) {
+  if (submitting.value) return      // 防重入：上一笔还没回来就忽略后续点击
   const word = currentWord.value
   if (!word.id) return
+  submitting.value = true
   try {
     await submitReviewAnswer(word.id, result)
     stats.value[result] += 1
@@ -217,6 +221,8 @@ async function answer(result) {
     }
   } catch (e) {
     toast(e.message, 'error')
+  } finally {
+    submitting.value = false
   }
 }
 

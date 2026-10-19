@@ -6,7 +6,6 @@
 import json
 import os
 from pathlib import Path
-from typing import Optional
 
 # 运行时配置文件位置（与 SQLite 同目录）
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -17,7 +16,7 @@ def _ensure_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_runtime_config() -> Optional[dict]:
+def load_runtime_config() -> dict | None:
     """读取运行时配置文件；不存在或格式错误返回 None"""
     if not CONFIG_FILE.exists():
         return None
@@ -51,7 +50,7 @@ def clear_runtime_config():
         CONFIG_FILE.unlink()
 
 
-def get_llm_config() -> Optional[tuple]:
+def get_llm_config() -> tuple | None:
     """获取当前生效的文本模型配置：优先运行时配置，否则 .env
 
     返回 (base_url, api_key, model)；任一缺失返回 None
@@ -68,7 +67,7 @@ def get_llm_config() -> Optional[tuple]:
     return base_url, api_key, model
 
 
-def get_vision_config() -> Optional[tuple]:
+def get_vision_config() -> tuple | None:
     """获取视觉模型配置：视觉用 .env（本期不做前端切换）
 
     LLM_VISION_BASE_URL / API_KEY 缺省时回落到文本模型配置

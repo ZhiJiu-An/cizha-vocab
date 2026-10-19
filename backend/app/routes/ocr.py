@@ -129,7 +129,7 @@ async def extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"视觉模型服务连接失败：{e}")
+        raise HTTPException(status_code=502, detail=f"视觉模型服务连接失败：{e}") from e
 
     if resp.status_code != 200:
         body = resp.text[:300]
@@ -139,14 +139,14 @@ async def extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
         content = resp.json()["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError) as e:
-        raise HTTPException(status_code=502, detail=f"视觉模型返回结构异常：{e}")
+        raise HTTPException(status_code=502, detail=f"视觉模型返回结构异常：{e}") from e
 
     # ---- 标注已在词库中的术语（前端标灰显示「已收藏」）----
     collected = {a.lower() for (a,) in db.query(Word.abbreviation).all()}
     try:
         original, translation, words = _parse_result(content, collected)
     except (ValueError, json.JSONDecodeError) as e:
-        raise HTTPException(status_code=502, detail=f"模型返回内容无法解析：{e}")
+        raise HTTPException(status_code=502, detail=f"模型返回内容无法解析：{e}") from e
 
     return OcrExtractResponse(total=len(words), original_text=original,
                                translation=translation, words=words)

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..common import STAGES_DAYS, tag_match_expr, today_start
 from ..database import get_db
 from ..models import Word, ReviewLog
 from ..schemas import (
@@ -18,28 +19,21 @@ from ..schemas import (
 
 router = APIRouter(prefix="/api/review", tags=["记忆复习"])
 
-# 六档间隔天数：stage 0~5 分别对应 1/2/4/7/15/30 天
-STAGES_DAYS = [1, 2, 4, 7, 15, 30]
 # 合法自评结果
 RESULTS = ("remember", "fuzzy", "forget")
 
 
-def _today_start() -> datetime:
-    """今天 00:00（按天对齐基准）"""
-    now = datetime.now()
-    return now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-
 def _due_query(db: Session, tag: str = ""):
     """到期词条查询：在复习队列 且 下次复习日期 <= 今天"""
-    today_end = _today_start() + timedelta(days=1)  # 今日 23:59:59 等价于 < 明天 00:00
+    today_end = today_start() + timedelta(days=1)  # 今日 23:59:59 等价于 < 明天 00:00
     query = db.query(Word).filter(
         Word.in_review == 1,
         Word.next_review_at.isnot(None),
         Word.next_review_at < today_end,
     )
     if tag:
-        query = query.filter(Word.tags.ilike(f"%{tag.strip()}%"))
+        # 与 /api/words 一致：边界精确匹配，避免 tag=AI 命中 OpenAI（P0-5）
+        query = query.filter(tag_match_expr(tag.strip()))
     return query
 
 
@@ -50,10 +44,10 @@ def get_overview(db: Session = Depends(get_db)):
     due_today = _due_query(db).count()
 
     # 今日已复习数：ReviewLog 按天 distinct word_id（防同词重复复习虚增）
-    today_start = _today_start()
+    day_start = today_start()
     reviewed_today = (
         db.query(func.count(func.distinct(ReviewLog.word_id)))
-        .filter(ReviewLog.reviewed_at >= today_start)
+        .filter(ReviewLog.reviewed_at >= day_start)
         .scalar()
     ) or 0
 
@@ -90,6 +84,20 @@ def submit_answer(word_id: int, answer: ReviewAnswerIn, db: Session = Depends(ge
     if not word:
         raise HTTPException(status_code=404, detail="词条不存在")
 
+    # ---- 到期守卫（P0-4）----
+    # 只允许「今天该复习」的词条提交自评。守卫同时让接口天然幂等：提交成功后
+    # next_review_at 最早是「明天 00:00」，当天再次提交必被拦住，不会出现重复点击
+    # 把档位多推一档、把复习日期越推越远的问题。
+    if word.in_review == 0:
+        raise HTTPException(status_code=409, detail="该词条不在复习队列中")
+    if word.next_review_at is None:
+        raise HTTPException(status_code=409, detail="该词条尚未安排复习时间")
+    if word.next_review_at >= today_start() + timedelta(days=1):
+        raise HTTPException(
+            status_code=409,
+            detail=f"该词条今天不需要复习，下次复习日期：{word.next_review_at:%Y-%m-%d}",
+        )
+
     stage_before = word.review_stage or 0
 
     # 三档规则：记住→升一档(封顶5) / 模糊→不变 / 忘记→回0
@@ -101,7 +109,7 @@ def submit_answer(word_id: int, answer: ReviewAnswerIn, db: Session = Depends(ge
         stage_after = stage_before
 
     # 下次复习日期 = 今天 00:00 + 对应档位天数（按天对齐）
-    next_review_at = _today_start() + timedelta(days=STAGES_DAYS[stage_after])
+    next_review_at = today_start() + timedelta(days=STAGES_DAYS[stage_after])
     now = datetime.now()
 
     word.review_stage = stage_after

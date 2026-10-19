@@ -36,7 +36,7 @@ class Word(Base):
     next_review_at = Column(DateTime, index=True, nullable=True)    # 下次复习日期（存当天 00:00）
     last_reviewed_at = Column(DateTime, nullable=True)              # 上次复习时间
     review_count = Column(Integer, default=0)                       # 累计复习次数
-    in_review = Column(Integer, default=1)                          # 1=在复习队列（为将来移出留口）
+    in_review = Column(Integer, default=1, index=True)               # 1=在复习队列（为将来移出留口）
 
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

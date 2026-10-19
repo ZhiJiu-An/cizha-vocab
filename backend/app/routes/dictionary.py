@@ -4,38 +4,40 @@
 改用有道：https://dict.youdao.com/jsonapi?q={word}
 返回英/美音标、中文通用释义、双语例句；免费、无需 Key。
 查不到的缩写术语返回 found=False，由用户手动填写。
-"""
-import json
-import socket
-import ssl
-import urllib.parse
-import urllib.request
-import urllib.error
 
+网络层用 httpx（P2-4）：与 translate / ocr / llm_config 保持一致，
+旧版用同步 urllib —— 会占住线程池、每次新建连接且无 keep-alive。
+"""
+import httpx
 from fastapi import APIRouter, HTTPException
 
 from ..schemas import DictionaryResult
 
 router = APIRouter(prefix="/api/dictionary", tags=["词典"])
 
-API_TMPL = "https://dict.youdao.com/jsonapi?q={word}"
+API_URL = "https://dict.youdao.com/jsonapi"
 TIMEOUT = 6  # 秒, 避免请求过久无响应
-
-# 需要统一兜住的网络异常（含超时/SSL，避免泄漏成 500）
-NET_ERRORS = (urllib.error.URLError, TimeoutError, socket.timeout, ssl.SSLError, OSError)
+USER_AGENT = "DanCiJi/0.4"
 
 
-def _fetch(word: str):
-    """请求有道词典，返回原始 JSON；调用失败抛 502"""
-    url = API_TMPL.format(word=urllib.parse.quote(word))
-    req = urllib.request.Request(url, headers={"User-Agent": "DanCiJi/0.3"})
+async def _fetch(word: str):
+    """请求有道词典，返回原始 JSON；调用失败一律抛 502（不泄漏成 500）"""
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except NET_ERRORS as e:
-        raise HTTPException(status_code=502, detail=f"词典服务暂时不可用：{e}")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="词典服务返回了无法解析的数据")
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.get(
+                API_URL, params={"q": word}, headers={"User-Agent": USER_AGENT}
+            )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"词典服务暂时不可用：{e}") from e
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502, detail=f"词典服务返回 {resp.status_code}"
+        )
+    try:
+        return resp.json()
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail="词典服务返回了无法解析的数据") from e
 
 
 def _wrap_phonetic(raw: str) -> str:
@@ -96,13 +98,13 @@ def _parse_examples(data: dict):
 
 
 @router.get("/{word}", response_model=DictionaryResult)
-def lookup(word: str):
+async def lookup(word: str):
     """查询词典：返回英/美音标、中文通用释义、例句"""
     word = word.strip()
     if not word:
         raise HTTPException(status_code=400, detail="单词不能为空")
 
-    data = _fetch(word)
+    data = await _fetch(word)
     uk, us = _parse_phonetics(data)
     api_meaning = _parse_meanings(data)
     examples = _parse_examples(data)

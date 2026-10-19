@@ -13,6 +13,9 @@ const routes = [
   { path: '/review', name: 'Review', component: () => import('../views/Review.vue') },
   { path: '/stats', name: 'Stats', component: () => import('../views/Stats.vue') },
   { path: '/settings', name: 'Settings', component: () => import('../views/Settings.vue') },
+  // 兜底路由（P1-5）：没有它时未知 URL 会让主区域整片空白。
+  // 重定向回首页（词典搜索），用户至少能继续用。
+  { path: '/:pathMatch(.*)*', name: 'NotFound', redirect: '/' },
 ]
 
 const router = createRouter({
