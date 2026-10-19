@@ -154,4 +154,6 @@ class OcrWordItem(BaseModel):
 
 class OcrExtractResponse(BaseModel):
     total: int
+    original_text: str = ""               # 图片中的原文（整体文字）
+    translation: str = ""                 # 原文的中文翻译
     words: List[OcrWordItem]
