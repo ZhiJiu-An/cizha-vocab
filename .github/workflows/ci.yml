@@ -1,0 +1,45 @@
+name: CI
+
+# 推送 main 分支、或向任意分支提 PR 时自动运行
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支有新推送时，自动取消上一次尚未跑完的任务
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端 ruff + 单元测试
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          # ruff 的 target-version 为 py310，这里用 3.12 兼顾「能跑」与「向前兼容」
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: 代码风格检查（ruff）
+        run: ruff check app tests
+
+      - name: 单元测试（unittest，共 73 个用例）
+        run: python -m unittest discover -s tests -t . -v
