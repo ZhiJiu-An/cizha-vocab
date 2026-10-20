@@ -1,6 +1,12 @@
 <template>
   <div>
-    <div class="page-title">🏷️ 标签</div>
+    <section class="intro">
+      <div>
+        <div class="eyebrow">ORGANIZE YOUR WORDS</div>
+        <h1>给词汇，贴上路标。</h1>
+        <p class="subtitle">用标签把零散的词条串成自己的知识地图。</p>
+      </div>
+    </section>
 
     <div v-if="tags.length" class="tags" style="gap: 10px">
       <button

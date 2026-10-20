@@ -2,7 +2,13 @@
   <div class="review-wrap">
     <!-- ========== 阶段一：准备 ========== -->
     <template v-if="phase === 'ready'">
-      <div class="page-title">🧠 记忆复习</div>
+      <section class="intro">
+        <div>
+          <div class="eyebrow">MAKE IT STICK</div>
+          <h1>温故，是为了更好的相遇。</h1>
+          <p class="subtitle">留一点时间给记忆，它会慢慢回应你。</p>
+        </div>
+      </section>
 
       <!-- 概览三个数字卡片 -->
       <div class="overview-cards">

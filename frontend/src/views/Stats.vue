@@ -1,6 +1,12 @@
 <template>
   <div class="stats-wrap">
-    <div class="page-title">📊 学习统计</div>
+    <section class="intro">
+      <div>
+        <div class="eyebrow">YOUR GROWTH, IN WORDS</div>
+        <h1>每一步，都算数。</h1>
+        <p class="subtitle">回头看看，你已经走了很远。</p>
+      </div>
+    </section>
 
     <!-- ===== 概览数字卡 ×4 ===== -->
     <div class="overview-cards stats-cards">

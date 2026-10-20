@@ -1,6 +1,13 @@
 <template>
   <div>
-    <div class="page-title">📚 词库</div>
+    <section class="intro">
+      <div>
+        <div class="eyebrow">YOUR WORD COLLECTION</div>
+        <h1>属于你的，语言花园。</h1>
+        <p class="subtitle">收集每一次好奇，让词汇成为自己的表达。</p>
+      </div>
+      <button class="primary" @click="router.push('/new')">＋ 发现新单词</button>
+    </section>
 
     <!-- 工具栏 -->
     <div class="toolbar">
@@ -14,7 +21,6 @@
       <span class="count">共 {{ total }} 条</span>
       <button class="btn btn-outline" @click="triggerImport">📥 导入 CSV</button>
       <button class="btn btn-outline" @click="doExport">📤 导出 CSV</button>
-      <button class="btn btn-primary" @click="router.push('/new')">➕ 新建</button>
       <input ref="fileInput" type="file" accept=".csv" style="display: none" @change="onImport" />
     </div>
 
@@ -89,7 +95,7 @@
 
     <div v-else class="empty">
       <div class="icon">🗂️</div>
-      <p>{{ keyword || activeTag ? '没有匹配的词条' : '还没有词条，点右上角「新建」开始记录' }}</p>
+      <p>{{ keyword || activeTag ? '没有匹配的词条' : '还没有词条，点上方「发现新单词」开始记录' }}</p>
     </div>
 
     <!-- 分页（P1-4）：旧版只渲染前 200 条却把总数显示成全量，超出的词条看不见 -->

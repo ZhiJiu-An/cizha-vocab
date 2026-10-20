@@ -1,7 +1,11 @@
 <template>
   <div class="app">
     <aside class="sidebar">
-      <div class="logo">📖 DanCiJi</div>
+      <div class="logo">
+        <span class="icon">🌿</span>
+        <b>DanCiJi<span>拾词</span></b>
+      </div>
+      <div class="workspace">PERSONAL WORKSPACE</div>
       <nav>
         <router-link
           v-for="item in navItems"
@@ -9,11 +13,16 @@
           :to="item.path"
           :class="{ active: isActive(item.path) }"
         >
-          <span class="ic">{{ item.icon }}</span>{{ item.title }}
+          <span class="ic">{{ item.icon }}</span><label>{{ item.title }}</label>
           <!-- 复习到期数徽章 -->
           <span v-if="item.path === '/review' && dueCount > 0" class="nav-badge">{{ dueCount }}</span>
         </router-link>
       </nav>
+      <div class="side-bottom">
+        <div class="plant">🪴</div>
+        <strong>让每个单词，慢慢生根。</strong>
+        <p>Stay curious. Keep growing.</p>
+      </div>
     </aside>
 
     <main class="main">
@@ -40,11 +49,10 @@ const dueCount = ref(0)
 
 const navItems = [
   { path: '/', icon: '🔍', title: '词典' },
-  { path: '/new', icon: '📝', title: '新建' },
   { path: '/words', icon: '📚', title: '词库' },
-  { path: '/tags', icon: '🏷️', title: '标签' },
   { path: '/review', icon: '🧠', title: '复习' },
   { path: '/stats', icon: '📊', title: '统计' },
+  { path: '/tags', icon: '🏷️', title: '标签' },
   { path: '/settings', icon: '⚙️', title: '设置' },
 ]
 
