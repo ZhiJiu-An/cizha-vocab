@@ -196,7 +196,7 @@ defineExpose({ reload: loadConfig })
   background: #fff;
   box-sizing: border-box;
 }
-.form-row input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+.form-row input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(52, 103, 79, .15); }
 .form-hint { display: block; font-size: 11px; color: var(--text-light); margin-top: 4px; line-height: 1.5; }
 
 .form-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }

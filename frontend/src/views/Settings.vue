@@ -1,7 +1,12 @@
 <template>
   <div class="settings-page">
-    <h2 class="page-title">⚙️ 模型设置</h2>
-    <p class="page-sub">切换大模型，无需重启服务。保存前会自动做连通性测试。</p>
+    <section class="intro">
+      <div>
+        <div class="eyebrow">TUNE YOUR ENGINE</div>
+        <h1>为好奇心，选一台好引擎。</h1>
+        <p class="subtitle">切换大模型，无需重启服务。保存前会自动做连通性测试。</p>
+      </div>
+    </section>
 
     <!-- 文本模型：翻译、领域详解 -->
     <ModelConfigCard
@@ -37,12 +42,10 @@ import ModelConfigCard from '../components/ModelConfigCard.vue'
 
 <style scoped>
 .settings-page { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-.page-sub { color: var(--text-light); font-size: 13px; margin-bottom: 20px; }
 
 /* 视觉模型卡片用左边框颜色区分，避免两张卡片长得一模一样 */
 .vision-card {
-  border-left: 3px solid #7c3aed;
+  border-left: 3px solid var(--yellow);
 }
 
 .settings-card {
