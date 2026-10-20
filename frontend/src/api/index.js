@@ -64,8 +64,15 @@ export const submitReviewAnswer = (wordId, result) =>
 /* ========= 学习统计 ========= */
 export const getStatsSummary = () => api.get('/stats/summary').then((r) => r.data)
 
-/* ========= 大模型配置 ========= */
-export const getLlmConfig = () => api.get('/llm/config').then((r) => r.data)
-export const saveLlmConfig = (data) => api.put('/llm/config', data).then((r) => r.data)
-export const testLlmConfig = (data) => api.post('/llm/test', data).then((r) => r.data)
-export const resetLlmConfig = () => api.delete('/llm/config').then((r) => r.data)
+/* ========= 大模型配置（kind: text 文本模型 / vision 视觉模型） ========= */
+// 连通测试要真连一次模型，视觉模型还带图，故单独放宽超时
+const TEST_TIMEOUT = 30000
+
+export const getLlmConfig = (kind = 'text') =>
+  api.get('/llm/config', { params: { kind } }).then((r) => r.data)
+export const saveLlmConfig = (kind, data) =>
+  api.put('/llm/config', data, { params: { kind } }).then((r) => r.data)
+export const testLlmConfig = (kind, data) =>
+  api.post('/llm/test', data, { params: { kind }, timeout: TEST_TIMEOUT }).then((r) => r.data)
+export const resetLlmConfig = (kind = 'text') =>
+  api.delete('/llm/config', { params: { kind } }).then((r) => r.data)
