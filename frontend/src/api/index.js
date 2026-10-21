@@ -89,15 +89,16 @@ export const resetReviewProgress = (wordId) =>
 export const getStatsSummary = (params = {}) =>
   api.get('/stats/summary', { params }).then((r) => r.data)
 
-/* ========= 大模型配置（kind: text 文本模型 / vision 视觉模型） ========= */
+/* ========= 模型配置（v0.12：模型列表 + 提示词） ========= */
 // 连通测试要真连一次模型，视觉模型还带图，故单独放宽超时
 const TEST_TIMEOUT = 30000
 
-export const getLlmConfig = (kind = 'text') =>
-  api.get('/llm/config', { params: { kind } }).then((r) => r.data)
-export const saveLlmConfig = (kind, data) =>
-  api.put('/llm/config', data, { params: { kind } }).then((r) => r.data)
-export const testLlmConfig = (kind, data) =>
-  api.post('/llm/test', data, { params: { kind }, timeout: TEST_TIMEOUT }).then((r) => r.data)
-export const resetLlmConfig = (kind = 'text') =>
-  api.delete('/llm/config', { params: { kind } }).then((r) => r.data)
+export const listModels = () => api.get('/llm/models').then((r) => r.data)
+// 新增 / 编辑都会先做连通测试，通过才写入
+export const createModel = (data) => api.post('/llm/models', data).then((r) => r.data)
+export const updateModel = (id, data) => api.put(`/llm/models/${id}`, data).then((r) => r.data)
+export const deleteModel = (id) => api.delete(`/llm/models/${id}`).then((r) => r.data)
+export const testModel = (data) =>
+  api.post('/llm/models/test', data, { timeout: TEST_TIMEOUT }).then((r) => r.data)
+export const setDefaultModel = (id) =>
+  api.post(`/llm/models/${id}/default`).then((r) => r.data)

@@ -82,46 +82,25 @@
     </section>
 
     <!-- ===== 模型配置 ===== -->
-    <div class="group-head">
-      <h3>模型配置</h3>
-      <p>切换大模型，无需重启服务。</p>
-    </div>
-
-    <!-- 默认收起：只显示当前模型摘要 + 入口按钮，避免设置页被大段表单淹没 -->
-    <div v-if="!modelEditorOpen" class="model-collapsed">
-      <div class="mc-summary">
-        <div class="mc-item">
-          <span class="mc-label">文本模型</span>
-          <span class="mc-value">{{ textModel || '未配置（使用 .env 默认）' }}</span>
-        </div>
-        <div class="mc-item">
-          <span class="mc-label">视觉模型</span>
-          <span class="mc-value">{{ visionModel || '未配置（与文本模型共用）' }}</span>
-        </div>
+    <section class="settings-group">
+      <div class="group-head">
+        <h3>模型配置</h3>
+        <p>模型列表、默认模型与提示词都在独立页面管理，保存前会自动做连通性测试。</p>
       </div>
-      <button class="btn btn-primary" @click="modelEditorOpen = true">⚙ 修改模型配置</button>
-    </div>
-
-    <template v-else>
-      <!-- 文本模型：翻译、领域详解 -->
-      <ModelConfigCard
-        kind="text"
-        title="文本模型"
-        subtitle="用于单词翻译与领域详解的生成。"
-      />
-
-      <!-- 视觉模型：图片取词 -->
-      <ModelConfigCard
-        kind="vision"
-        title="视觉模型（图片取词）"
-        subtitle="用于识别截图里的术语。模型名必填；Base URL 与 API Key 留空则与文本模型共用，切换后立即生效。"
-        class="vision-card"
-      />
-
-      <div style="text-align: center; margin-top: 14px">
-        <button class="btn btn-ghost" @click="modelEditorOpen = false">收起</button>
+      <div class="settings-card model-entry">
+        <div class="me-summary">
+          <div class="me-item">
+            <span class="me-label">文本模型</span>
+            <span class="me-value">{{ textModel || '未配置' }}</span>
+          </div>
+          <div class="me-item">
+            <span class="me-label">视觉模型</span>
+            <span class="me-value">{{ visionModel || '未配置' }}</span>
+          </div>
+        </div>
+        <router-link class="btn btn-primary" to="/settings/models">模型与提示词 →</router-link>
       </div>
-    </template>
+    </section>
 
     <!-- 配置小抄 -->
     <div class="settings-card info">
@@ -129,29 +108,31 @@
       <ul>
         <li>地址填到 <code>/v1</code> 这一层，不要带 <code>/chat/completions</code>。</li>
         <li>DeepSeek 官方 API 没有视觉模型，视觉模型需另配一家（如阿里百炼 <code>qwen3-vl-plus</code>、智谱 <code>glm-4v</code>）。</li>
-        <li>两套配置独立保存于 <code>backend/data/llm_config.json</code>，优先于 <code>backend/.env</code>；点「恢复 .env 默认」只清除当前这张卡片。</li>
-        <li>「连通测试会消耗少量 token」：每次点保存或测试都会真实调用一次模型。</li>
+        <li>模型列表保存在 <code>backend/data/llm_config.json</code>；<code>backend/.env</code> 只在首次初始化时作为默认值。</li>
+        <li>文本模型的提示词必须保留五段标记与 <code>{word}</code> 占位符，可在预设基础上按领域微调。</li>
+        <li>「连通测试会消耗少量 token」：每次保存或测试都会真实调用一次模型。</li>
       </ul>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
-import ModelConfigCard from '../components/ModelConfigCard.vue'
-import { getLlmConfig } from '../api'
+import { computed, onMounted, ref } from 'vue'
+import { listModels } from '../api'
 import { prefs } from '../utils/prefs'
 import { toast } from '../utils'
 
-const modelEditorOpen = ref(false)
-const textModel = ref('')
-const visionModel = ref('')
+const models = ref([])
+const textModel = computed(
+  () => models.value.find((m) => m.role === 'default_text')?.model || '',
+)
+const visionModel = computed(
+  () => models.value.find((m) => m.role === 'default_vision')?.model || '',
+)
 
 onMounted(async () => {
   try {
-    const [t, v] = await Promise.all([getLlmConfig('text'), getLlmConfig('vision')])
-    textModel.value = t.model || ''
-    visionModel.value = v.model || ''
+    models.value = (await listModels()).models
   } catch {
     /* 配置读取失败不阻塞设置页 */
   }
@@ -185,10 +166,19 @@ async function toggleReminder() {
 .group-head h3 { font-size: 14px; font-weight: 600; color: var(--text); }
 .group-head p { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
-/* 视觉模型卡片用左边框颜色区分，避免两张卡片长得一模一样 */
-.vision-card {
-  border-left: 3px solid var(--yellow);
+/* 模型入口卡（v0.12）：只展示默认模型摘要 + 跳转按钮 */
+.model-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
 }
+.me-summary { display: flex; flex-direction: column; gap: 7px; }
+.me-item { font-size: 12px; }
+.me-label { color: var(--muted); margin-right: 10px; }
+.me-value { color: var(--text); font-weight: 500; }
+.model-entry .btn { flex: 0 0 auto; font-size: 12px; padding: 9px 14px; }
 
 .settings-card {
   background: var(--card-bg);
@@ -202,23 +192,6 @@ async function toggleReminder() {
 .settings-card.info h3 { font-size: 15px; margin-bottom: 8px; }
 .settings-card.info ul { font-size: 13px; color: var(--text-light); padding-left: 20px; line-height: 1.8; }
 .settings-card.info code { background: #e8ede4; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
-
-/* 模型配置收起态：只显示当前模型名 + 修改按钮 */
-.model-collapsed {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow-sm);
-}
-.mc-summary { display: flex; flex-direction: column; gap: 6px; }
-.mc-item { font-size: 13px; }
-.mc-label { color: var(--muted); margin-right: 8px; }
-.mc-value { color: var(--text); font-weight: 500; }
 
 .set-row {
   display: flex;
