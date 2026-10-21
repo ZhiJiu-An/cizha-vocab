@@ -7,14 +7,15 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..common import STAGES_DAYS, tag_match_expr, today_start
 from ..database import get_db
 from ..models import Word, ReviewLog
 from ..schemas import (
-    ReviewAnswerIn, ReviewAnswerOut, ReviewOverview, ReviewDueResponse,
+    MistakeItem, MistakeResponse, ReviewAnswerIn, ReviewAnswerOut, ReviewOverview,
+    ReviewResetOut, ReviewDueResponse,
 )
 
 router = APIRouter(prefix="/api/review", tags=["记忆复习"])
@@ -35,6 +36,26 @@ def _due_query(db: Session, tag: str = ""):
         # 与 /api/words 一致：边界精确匹配，避免 tag=AI 命中 OpenAI（P0-5）
         query = query.filter(tag_match_expr(tag.strip()))
     return query
+
+
+def _review_stats(db):
+    """按词条聚合 ReviewLog：忘记次数 / 模糊次数 / 总次数 / 最近一次忘记时间（v0.11）
+
+    用条件聚合一次算出四个值，避免为每个统计口径各查一遍。
+    """
+    return (
+        db.query(
+            ReviewLog.word_id.label("word_id"),
+            func.sum(case((ReviewLog.result == "forget", 1), else_=0)).label("forget_times"),
+            func.sum(case((ReviewLog.result == "fuzzy", 1), else_=0)).label("fuzzy_times"),
+            func.count().label("total_reviews"),
+            func.max(
+                case((ReviewLog.result == "forget", ReviewLog.reviewed_at))
+            ).label("last_forgot_at"),
+        )
+        .group_by(ReviewLog.word_id)
+        .subquery()
+    )
 
 
 # ========== 概览 ==========
@@ -62,14 +83,122 @@ def get_overview(db: Session = Depends(get_db)):
 
 # ========== 到期词条 ==========
 @router.get("/due", response_model=ReviewDueResponse)
-def get_due_words(tag: str = "", limit: int = 20, db: Session = Depends(get_db)):
-    """取到期词条：按到期时间升序（最久没复习的排前面）"""
+def get_due_words(
+    tag: str = "",
+    limit: int = 20,
+    order: str = "due",
+    db: Session = Depends(get_db),
+):
+    """取到期词条
+
+    order="due"（默认）按到期时间升序：最久没复习的排前面。
+    order="mistakes"（v0.11）按「历史忘记次数」降序，再按到期时间升序 ——
+    同样只取真正到期的词，因此不会破坏复习排期语义（非到期词提交自评仍会被 409 拦下）。
+    """
     query = _due_query(db, tag)
     total_due = query.count()
-    items = (query.order_by(Word.next_review_at.asc())
-             .limit(max(1, min(limit, 200)))
-             .all())
+
+    if order == "mistakes":
+        stats = _review_stats(db)
+        query = (
+            query.outerjoin(stats, stats.c.word_id == Word.id)
+            .order_by(
+                func.coalesce(stats.c.forget_times, 0).desc(),
+                Word.next_review_at.asc(),
+            )
+        )
+    else:
+        query = query.order_by(Word.next_review_at.asc())
+
+    items = query.limit(max(1, min(limit, 200))).all()
     return {"total_due": total_due, "items": items}
+
+
+# ========== 错词本（v0.11） ==========
+@router.get("/mistakes", response_model=MistakeResponse)
+def get_mistakes(
+    limit: int = 20,
+    min_forget: int = 1,
+    db: Session = Depends(get_db),
+):
+    """错词本：按「忘记」次数降序返回最需要重练的词
+
+    ReviewLog 从 v0.5 起就在记每次自评结果，但此前只被用来数「今日已复习」。
+    这份数据正好回答「哪些词我老是记不住」，无需任何迁移。
+    min_forget=1 表示只返回至少忘过一次的词。
+    """
+    stats = _review_stats(db)
+    threshold = max(1, min_forget)
+
+    total = (
+        db.query(func.count())
+        .select_from(stats)
+        .filter(stats.c.forget_times >= threshold)
+        .scalar()
+    ) or 0
+
+    rows = (
+        db.query(
+            Word,
+            stats.c.forget_times,
+            stats.c.fuzzy_times,
+            stats.c.total_reviews,
+            stats.c.last_forgot_at,
+        )
+        .join(stats, stats.c.word_id == Word.id)
+        .filter(stats.c.forget_times >= threshold)
+        .order_by(
+            stats.c.forget_times.desc(),
+            stats.c.last_forgot_at.desc(),
+            Word.id.asc(),
+        )
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+
+    items = []
+    for word, forget_times, fuzzy_times, total_reviews, last_forgot_at in rows:
+        item = MistakeItem.model_validate(word)
+        item.forget_times = int(forget_times or 0)
+        item.fuzzy_times = int(fuzzy_times or 0)
+        item.total_reviews = int(total_reviews or 0)
+        item.last_forgot_at = last_forgot_at
+        items.append(item)
+
+    return {"total": total, "items": items}
+
+
+# ========== 重置复习进度（v0.11） ==========
+@router.post("/{word_id}/reset", response_model=ReviewResetOut)
+def reset_progress(word_id: int, db: Session = Depends(get_db)):
+    """把某个词的复习**排期**归零，从第 0 档重新开始
+
+    此前误点「记住」把档位推进去之后没有任何办法退回来 —— 只能删词重建。
+
+    刻意只重置「排期」（档位 + 下次复习日期），**不动累计次数与上次复习时间**，
+    也不写 ReviewLog。理由：
+    - 你确实复习过 N 次，这个事实不该被一个按钮抹掉；
+    - 更重要的是口径一致：详情页读 review_count、错词本与统计读 COUNT(review_logs)，
+      若这里清零而日志保留，同一个词会出现「累计复习 0 次」与「总复习 4 次」并存。
+    - 想彻底忘掉一个词，应当另设「清除全部复习记录」动作（连带删 ReviewLog），
+      而不是让「重置排期」一个动作承担两种口径。
+    """
+    word = db.query(Word).filter(Word.id == word_id).first()
+    if not word:
+        raise HTTPException(status_code=404, detail="词条不存在")
+
+    word.review_stage = 0
+    word.next_review_at = today_start()   # 立刻回到今天可复习
+    # review_count / last_reviewed_at 保持不变（见 docstring）
+    db.commit()
+    db.refresh(word)
+
+    return {
+        "word_id": word.id,
+        "review_stage": word.review_stage,
+        "next_review_at": word.next_review_at,
+        "review_count": word.review_count,   # 保留累计次数
+    }
 
 
 # ========== 提交自评 ==========

@@ -54,7 +54,10 @@
     <section class="settings-group">
       <div class="group-head">
         <h3>学习提醒</h3>
-        <p>到点提醒你今天还有多少词等着复习（需保持页面打开）。</p>
+        <p>
+          到点提醒你今天还有多少词等着复习。页面在后台时用系统通知
+          （需在浏览器弹窗里允许通知），页面可见时用应用内提示。
+        </p>
       </div>
       <div class="settings-card">
         <div class="set-row">

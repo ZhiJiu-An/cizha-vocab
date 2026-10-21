@@ -59,7 +59,7 @@ def _migrate():
 
 _migrate()
 
-app = FastAPI(title="DanCiJi 术语记录本", version="0.9.0")
+app = FastAPI(title="DanCiJi 术语记录本", version="0.11.0")
 
 # 跨域（Vue 前端在另一端口）
 app.add_middleware(
@@ -83,7 +83,7 @@ app.include_router(llm_config.router)
 def root():
     return {
         "name": "DanCiJi",
-        "version": "0.9.0",
+        "version": "0.11.0",
         "docs": "/docs",
         "message": "面向技术从业者的术语 / 单词记录本",
     }

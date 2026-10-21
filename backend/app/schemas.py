@@ -1,5 +1,5 @@
-"""请求 / 响应模型 (v0.7)"""
-from pydantic import BaseModel
+"""请求 / 响应模型 (v0.11)"""
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
@@ -36,6 +36,9 @@ class WordUpdate(BaseModel):
     examples: list[ExampleItem] | None = None
     tags: str | None = None
     note: str | None = None
+    # 复习队列开关（v0.11）：0 = 移出队列（不再安排复习），1 = 在队列。
+    # 该列自 v0.5 就存在且被 /review 各处查询，但此前没有任何入口能改它。
+    in_review: int | None = Field(default=None, ge=0, le=1)
 
 
 class WordResponse(BaseModel):
@@ -52,11 +55,81 @@ class WordResponse(BaseModel):
     tags: str = ""
     note: str = ""
     has_abbr: int = 0
+    in_review: int = 1            # 1=在复习队列，0=已移出（v0.11 暴露给前端回显）
+
+    # ---- 复习状态（v0.11）----
+    # 这几个字段自 v0.5 就存在，但此前只有 /review/due 的响应才带，
+    # 导致词条详情页与悬浮窗完全看不到「我复习到第几档、下次何时考、忘过几次」。
+    review_stage: int = 0
+    next_review_at: datetime | None = None
+    last_reviewed_at: datetime | None = None
+    review_count: int = 0
+
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
+
+
+class WordLookupResult(BaseModel):
+    """本地库精确查找结果（v0.11）
+
+    搜索页每次搜索都会调一次，用于判断「这个词是不是已经收藏过」。
+    不命中返回 found=False 而不是 404，避免前端把正常情况当错误处理。
+    """
+    found: bool = False
+    word: WordResponse | None = None
+
+
+# ========== 批量操作（v0.11） ==========
+class BulkIdsIn(BaseModel):
+    """一组词条 id（批量删除用）"""
+    ids: list[int] = Field(min_length=1, max_length=1000)
+
+
+class BulkTagIn(BulkIdsIn):
+    """为选中词条追加标签：tags 直接收数组，前端不必自己拼逗号分隔串"""
+    tags: list[str] = Field(min_length=1, max_length=20)
+
+
+class BulkResult(BaseModel):
+    requested: int = 0            # 去重后实际请求处理的条数
+    succeeded: int = 0            # 成功条数
+    failed: int = 0               # 失败条数
+    missing_ids: list[int] = []   # 数据库中不存在的 id
+
+
+class WordRestoreItem(BaseModel):
+    """撤销删除时回灌的完整词条（含复习进度与创建时间）"""
+    abbreviation: str
+    full_name: str = ""
+    cn_term: str = ""
+    phonetic_uk: str = ""
+    phonetic_us: str = ""
+    my_meaning: str
+    domain_detail: str = ""
+    api_meaning: str = ""
+    examples: list[ExampleItem] = []
+    tags: str = ""
+    note: str = ""
+    review_stage: int = 0
+    next_review_at: datetime | None = None
+    review_count: int = 0
+    in_review: int = 1
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class BulkRestoreIn(BaseModel):
+    items: list[WordRestoreItem] = Field(min_length=1, max_length=1000)
+
+
+class RestoreResult(BaseModel):
+    requested: int = 0
+    restored: int = 0
+    skipped: int = 0              # 已存在同名词条而跳过
+    words: list[WordResponse] = []
 
 
 class WordListResponse(BaseModel):
@@ -99,17 +172,35 @@ class ReviewOverview(BaseModel):
     total_in_queue: int                  # 复习队列总词条数
 
 
-class ReviewWordItem(WordResponse):
-    """到期词条 = 词条全量字段 + 复习状态"""
+class ReviewDueResponse(BaseModel):
+    """到期词条列表（v0.11 起 WordResponse 已含复习状态，无需再单独定义子模型）"""
+    total_due: int
+    items: list[WordResponse]
+
+
+class ReviewResetOut(BaseModel):
+    """重置复习进度的结果（v0.11）"""
+    word_id: int
     review_stage: int = 0
     next_review_at: datetime | None = None
-    last_reviewed_at: datetime | None = None
     review_count: int = 0
 
 
-class ReviewDueResponse(BaseModel):
-    total_due: int
-    items: list[ReviewWordItem]
+class MistakeItem(WordResponse):
+    """错词本条目 = 词条全量字段 + 复习结果统计（v0.11）
+
+    ReviewLog 从 v0.5 起就记录了每次自评的 result，但此前只被用来数「今日已复习 /
+    累计复习」。这里把同一份数据聚合成「最常忘记的词」，用于针对性重练。
+    """
+    forget_times: int = 0                # 累计「忘记」次数
+    fuzzy_times: int = 0                 # 累计「模糊」次数
+    total_reviews: int = 0               # 该词累计复习次数
+    last_forgot_at: datetime | None = None  # 最近一次「忘记」的时间
+
+
+class MistakeResponse(BaseModel):
+    total: int                           # 命中的错词总数（不受 limit 影响）
+    items: list[MistakeItem]
 
 
 # ========== 学习统计 ==========
@@ -142,6 +233,9 @@ class StatsSummary(BaseModel):
     tag_distribution: list[TagDistItem]
     daily_trend: list[DailyTrendItem]
     stage_distribution: list[StageDistItem]
+    # v0.11：趋势图实际覆盖的天数与聚合粒度（day / week），供前端标注标题
+    trend_days: int = 7
+    trend_granularity: str = "day"
 
 
 # ========== 图片取词 ==========

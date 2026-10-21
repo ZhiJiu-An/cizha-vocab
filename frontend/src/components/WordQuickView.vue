@@ -64,6 +64,24 @@
             <div class="v">{{ word.note }}</div>
           </div>
 
+          <!-- 复习状态（v0.11）：字段自 v0.5 就有，此前悬浮窗看不到 -->
+          <div class="detail-block">
+            <div class="k">🧠 记忆复习</div>
+            <div class="v">
+              <div class="rv-line">
+                <span class="rv-k">当前档位</span>
+                第 {{ word.review_stage + 1 }} 档 · 每 {{ stageDays(word.review_stage) }} 天
+              </div>
+              <div class="rv-line">
+                <span class="rv-k">下次复习</span>{{ nextReviewLabel(word.next_review_at) }}
+              </div>
+              <div class="rv-line">
+                <span class="rv-k">累计复习</span>{{ word.review_count }} 次
+                <span v-if="!word.in_review" class="queue-off">· 已移出复习队列</span>
+              </div>
+            </div>
+          </div>
+
           <div class="detail-block">
             <div class="k">时间</div>
             <div class="v muted">
@@ -93,7 +111,7 @@ import { useRouter } from 'vue-router'
 import Phonetics from './Phonetics.vue'
 import WordBadge from './WordBadge.vue'
 import { getWord } from '../api'
-import { cardType, parseTags, relativeTime, toast } from '../utils'
+import { cardType, nextReviewLabel, parseTags, relativeTime, stageDays, toast } from '../utils'
 
 const props = defineProps({
   wordId: { type: Number, required: true },

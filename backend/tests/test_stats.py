@@ -120,3 +120,97 @@ class TestStatsSummary(ApiTestCase):
         self.assertEqual(len(body["daily_trend"]), 7)
         self.assertEqual(len(body["stage_distribution"]), 6)
         self.assertEqual(body["tag_distribution"], [])
+
+
+class TestTrendRange(ApiTestCase):
+    """B3：统计趋势支持时间范围，长区间自动按周聚合"""
+
+    def summary(self, **params):
+        resp = self.client.get("/api/stats/summary", params=params)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
+    def test_default_is_seven_days(self):
+        body = self.summary()
+        self.assertEqual(len(body["daily_trend"]), 7)
+        self.assertEqual(body["trend_days"], 7)
+        self.assertEqual(body["trend_granularity"], "day")
+
+    def test_thirty_days_stay_daily(self):
+        body = self.summary(days=30)
+        self.assertEqual(len(body["daily_trend"]), 30)
+        self.assertEqual(body["trend_granularity"], "day")
+        self.assertEqual(body["trend_days"], 30)
+
+    def test_ninety_days_roll_up_to_weeks(self):
+        body = self.summary(days=90)
+        self.assertEqual(body["trend_granularity"], "week")
+        self.assertEqual(len(body["daily_trend"]), 13)      # ceil(90 / 7)
+        self.assertEqual(body["trend_days"], 90)
+
+    def test_bounds(self):
+        for bad in (0, -1, 366, 10 ** 6):
+            with self.subTest(days=bad):
+                self.assertEqual(
+                    self.client.get("/api/stats/summary", params={"days": bad}).status_code, 422
+                )
+
+    def test_last_bucket_includes_today(self):
+        from datetime import datetime
+        word = self.create_word("today")
+        self.client.post(f"/api/review/{word['id']}/answer", json={"result": "remember"})
+        for days in (7, 30, 90):
+            with self.subTest(days=days):
+                trend = self.summary(days=days)["daily_trend"]
+                # 最新一个桶必须含今天的产生量
+                self.assertGreaterEqual(trend[-1]["new_words"], 1)
+                self.assertGreaterEqual(trend[-1]["reviews"], 1)
+
+    def test_counts_scale_with_window(self):
+        from datetime import datetime as dt, timedelta
+        from app.models import ReviewLog
+
+        word = self.create_word("hist")
+        db = self.SessionLocal()
+        try:
+            # 3 天前 2 次、40 天前 5 次（后者只应出现在更长窗口里）
+            for days_ago, times in ((3, 2), (40, 5)):
+                stamp = dt.now() - timedelta(days=days_ago)
+                for _ in range(times):
+                    db.add(ReviewLog(word_id=word["id"], reviewed_at=stamp,
+                                     result="remember", stage_before=0, stage_after=0))
+            db.commit()
+        finally:
+            db.close()
+
+        total = lambda d: sum(x["reviews"] for x in self.summary(days=d)["daily_trend"])
+        self.assertEqual(total(7), 2)
+        self.assertEqual(total(30), 2)
+        self.assertEqual(total(90), 7)      # 40 天前那 5 次落在 90 天窗口内
+
+    def test_week_new_keeps_fixed_seven_day_scope(self):
+        """概览里的「近 7 天新增」不该随 days 变化"""
+        self.create_word("a")
+        for days in (7, 30, 90):
+            with self.subTest(days=days):
+                self.assertEqual(self.summary(days=days)["totals"]["week_new"], 1)
+
+    def test_weekly_buckets_sum_equals_daily_window(self):
+        """周聚合只是把同一批数据合并，总量不应变化"""
+        from datetime import datetime as dt, timedelta
+        from app.models import ReviewLog
+
+        word = self.create_word("w")
+        db = self.SessionLocal()
+        try:
+            for days_ago in (0, 1, 8, 20):
+                db.add(ReviewLog(word_id=word["id"], reviewed_at=dt.now() - timedelta(days=days_ago),
+                                 result="fuzzy", stage_before=0, stage_after=0))
+            db.commit()
+        finally:
+            db.close()
+
+        daily = sum(x["reviews"] for x in self.summary(days=30)["daily_trend"])
+        weekly = sum(x["reviews"] for x in self.summary(days=90)["daily_trend"])
+        self.assertEqual(daily, 4)
+        self.assertEqual(weekly, 4)
