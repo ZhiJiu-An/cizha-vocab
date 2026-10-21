@@ -149,28 +149,31 @@ if FRONTEND_DIST.is_dir():
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
-    def serve_spa(full_path: str):
-        """静态文件优先，其余路径回落到 index.html（适配 vue-router history 模式）"""
-        if is_api_path(full_path):
-            raise HTTPException(status_code=404, detail="接口不存在")
 
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_spa(full_path: str):
+    """静态文件优先，其余路径回落到 index.html（适配 vue-router history 模式）。
+
+    未构建前端时（开发 / CI 环境）：`/` 返回兜底信息页，其余路径 404。
+    无论前端是否构建，未匹配的 /api/* 一律返回 JSON 404。
+    """
+    if is_api_path(full_path):
+        raise HTTPException(status_code=404, detail="接口不存在")
+
+    if FRONTEND_DIST.is_dir():
         resolved = resolve_spa_path(full_path, FRONTEND_DIST)
         if resolved is not None:
             return FileResponse(resolved)
 
         index = FRONTEND_DIST / "index.html"
-        if not index.is_file():
-            raise HTTPException(status_code=404, detail="前端未构建")
-        return FileResponse(index)
+        if index.is_file():
+            return FileResponse(index)
 
-else:
-    @app.get("/")
-    def root():
-        """未构建前端时的兜底信息页（开发 / CI 环境）"""
+    if full_path == "":
         return {
             "name": APP_NAME,
             "version": APP_VERSION,
             "docs": "/docs",
             "message": "面向技术从业者的术语 / 单词记录本（前端未构建，请运行 ./setup.sh 或 npm run build）",
         }
+    raise HTTPException(status_code=404, detail="前端未构建")
