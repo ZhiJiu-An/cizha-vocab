@@ -4,8 +4,8 @@
     <section class="intro">
       <div>
         <div class="eyebrow">EXPLORE A WORLD OF WORDS</div>
-        <h1>查单词，记术语。</h1>
-        <p class="subtitle">左边是词典的通用释义，右边是大模型的领域解读。查到之后一键收藏进你的词库。</p>
+        <h1>让每个单词，慢慢生根。</h1>
+        <p class="subtitle">同时查看词典通用释义与 AI 领域解读，遇到值得记住的词，一键收进自己的词库。</p>
       </div>
       <span class="intro-note">Stay curious. Keep growing.</span>
     </section>
@@ -15,7 +15,7 @@
         <span class="search-icon">⌕</span>
         <input
           v-model="keyword"
-          placeholder="输入单词、短语或领域缩写，如 token / chain of thought / RAG ..."
+          placeholder="搜索单词、短语或领域缩写，开启一次新的发现…"
           autofocus
           @keydown.enter="doSearch"
           @paste="onPaste"
@@ -86,8 +86,8 @@
 
     <!-- ===== 空状态 ===== -->
     <div v-if="!searched" class="empty-hint">
-      <div class="icon">🔍</div>
-      <p>左边是词典的通用释义，右边是大模型的领域解读<br>查到之后一键收藏进你的词库</p>
+      <span class="empty-hint-mark">✳</span>
+      <p>随手一查，让好奇心有迹可循。<br>查到之后，收藏进自己的词库。</p>
     </div>
 
     <template v-else>
@@ -113,6 +113,7 @@
                 <Phonetics
                   :uk="dict.phonetic_uk"
                   :us="dict.phonetic_us"
+                  :word="dict.word"
                   wrapper-class="dict-phos"
                   item-class="dict-phonetic"
                 />
