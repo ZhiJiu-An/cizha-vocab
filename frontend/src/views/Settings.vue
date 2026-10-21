@@ -87,20 +87,41 @@
       <p>切换大模型，无需重启服务。</p>
     </div>
 
-    <!-- 文本模型：翻译、领域详解 -->
-    <ModelConfigCard
-      kind="text"
-      title="文本模型"
-      subtitle="用于单词翻译与领域详解的生成。"
-    />
+    <!-- 默认收起：只显示当前模型摘要 + 入口按钮，避免设置页被大段表单淹没 -->
+    <div v-if="!modelEditorOpen" class="model-collapsed">
+      <div class="mc-summary">
+        <div class="mc-item">
+          <span class="mc-label">文本模型</span>
+          <span class="mc-value">{{ textModel || '未配置（使用 .env 默认）' }}</span>
+        </div>
+        <div class="mc-item">
+          <span class="mc-label">视觉模型</span>
+          <span class="mc-value">{{ visionModel || '未配置（与文本模型共用）' }}</span>
+        </div>
+      </div>
+      <button class="btn btn-primary" @click="modelEditorOpen = true">⚙ 修改模型配置</button>
+    </div>
 
-    <!-- 视觉模型：图片取词 -->
-    <ModelConfigCard
-      kind="vision"
-      title="视觉模型（图片取词）"
-      subtitle="用于识别截图里的术语。模型名必填；Base URL 与 API Key 留空则与文本模型共用，切换后立即生效。"
-      class="vision-card"
-    />
+    <template v-else>
+      <!-- 文本模型：翻译、领域详解 -->
+      <ModelConfigCard
+        kind="text"
+        title="文本模型"
+        subtitle="用于单词翻译与领域详解的生成。"
+      />
+
+      <!-- 视觉模型：图片取词 -->
+      <ModelConfigCard
+        kind="vision"
+        title="视觉模型（图片取词）"
+        subtitle="用于识别截图里的术语。模型名必填；Base URL 与 API Key 留空则与文本模型共用，切换后立即生效。"
+        class="vision-card"
+      />
+
+      <div style="text-align: center; margin-top: 14px">
+        <button class="btn btn-ghost" @click="modelEditorOpen = false">收起</button>
+      </div>
+    </template>
 
     <!-- 配置小抄 -->
     <div class="settings-card info">
@@ -116,9 +137,25 @@
 </template>
 
 <script setup>
+import { onMounted, ref } from 'vue'
 import ModelConfigCard from '../components/ModelConfigCard.vue'
+import { getLlmConfig } from '../api'
 import { prefs } from '../utils/prefs'
 import { toast } from '../utils'
+
+const modelEditorOpen = ref(false)
+const textModel = ref('')
+const visionModel = ref('')
+
+onMounted(async () => {
+  try {
+    const [t, v] = await Promise.all([getLlmConfig('text'), getLlmConfig('vision')])
+    textModel.value = t.model || ''
+    visionModel.value = v.model || ''
+  } catch {
+    /* 配置读取失败不阻塞设置页 */
+  }
+})
 
 function setAccent(accent) {
   if (prefs.accent === accent) return
@@ -165,6 +202,23 @@ async function toggleReminder() {
 .settings-card.info h3 { font-size: 15px; margin-bottom: 8px; }
 .settings-card.info ul { font-size: 13px; color: var(--text-light); padding-left: 20px; line-height: 1.8; }
 .settings-card.info code { background: #e8ede4; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+
+/* 模型配置收起态：只显示当前模型名 + 修改按钮 */
+.model-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+.mc-summary { display: flex; flex-direction: column; gap: 6px; }
+.mc-item { font-size: 13px; }
+.mc-label { color: var(--muted); margin-right: 8px; }
+.mc-value { color: var(--text); font-weight: 500; }
 
 .set-row {
   display: flex;
