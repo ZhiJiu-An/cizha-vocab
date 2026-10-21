@@ -74,6 +74,47 @@
         </div>
       </div>
 
+      <!-- 复习状态与队列控制（v0.11）：这些字段自 v0.5 就存在，
+           但此前详情页完全看不到，in_review 也没有任何入口能改 -->
+      <div class="detail-block">
+        <div class="k">🧠 记忆复习</div>
+        <div class="v">
+          <div class="rv-line">
+            <span class="rv-k">当前档位</span>
+            第 {{ word.review_stage + 1 }} 档 · 每 {{ stageDays(word.review_stage) }} 天
+          </div>
+          <div class="rv-line">
+            <span class="rv-k">下次复习</span>
+            <span :class="isOverdue ? 'queue-off' : ''">{{ nextReviewLabel(word.next_review_at) }}</span>
+          </div>
+          <div class="rv-line">
+            <span class="rv-k">累计复习</span>
+            {{ word.review_count }} 次<template v-if="word.last_reviewed_at">
+              · 上次 {{ relativeTime(word.last_reviewed_at) }}</template>
+          </div>
+          <div class="rv-actions">
+            <span :class="word.in_review ? 'queue-on' : 'queue-off'">
+              {{ word.in_review ? '在复习队列中' : '已移出复习队列' }}
+            </span>
+            <button
+              class="btn btn-outline btn-sm"
+              :disabled="queueBusy"
+              @click="toggleQueue"
+            >
+              {{ queueBusy ? '处理中…' : (word.in_review ? '⏸ 移出队列' : '▶ 加入队列') }}
+            </button>
+            <button
+              class="btn btn-ghost btn-sm"
+              :disabled="queueBusy"
+              title="把档位与累计次数清零，当作新词重新开始"
+              @click="resetProgress"
+            >
+              ↺ 重置进度
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div
         style="
           display: flex;
@@ -117,8 +158,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Phonetics from '../components/Phonetics.vue'
 import WordBadge from '../components/WordBadge.vue'
-import { deleteWord, getWord } from '../api'
-import { cardType, parseTags, relativeTime, toast } from '../utils'
+import { deleteWord, getWord, resetReviewProgress, restoreWords, updateWord } from '../api'
+import { cardType, nextReviewLabel, parseTags, relativeTime, stageDays, toast } from '../utils'
 
 const route = useRoute()
 const router = useRouter()
@@ -126,22 +167,77 @@ const router = useRouter()
 const word = ref(null)
 const loading = ref(true)
 const showConfirm = ref(false)
+const queueBusy = ref(false)
 
 // 例句兼容：v0.4 为 {en, zh} 对象，旧数据可能仍是纯字符串。
 // 一次性归一成数组后模板直接用，避免每条例句渲染时重复调用（P2-5）
 const examples = computed(() => (word.value?.examples || []).map(exampleText))
 const wordType = computed(() => cardType(word.value || {}))
 
+// 下次复习日期已过（或就是今天）时高亮，提示「该复习了」
+const isOverdue = computed(() => {
+  const iso = word.value?.next_review_at
+  if (!iso) return false
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return false
+  const startOf = (x) => { const y = new Date(x); y.setHours(0, 0, 0, 0); return y }
+  return startOf(d) <= startOf(new Date())
+})
+
 function exampleText(ex) {
   if (ex && typeof ex === 'object') return { en: ex.en || '', zh: ex.zh || '' }
   return { en: String(ex ?? ''), zh: '' }
 }
 
+// 移出 / 加入复习队列（v0.11）
+async function toggleQueue() {
+  if (!word.value || queueBusy.value) return
+  const next = word.value.in_review ? 0 : 1
+  queueBusy.value = true
+  try {
+    const updated = await updateWord(word.value.id, { in_review: next })
+    word.value = updated
+    toast(next ? '已加入复习队列' : '已移出复习队列', 'success')
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    queueBusy.value = false
+  }
+}
+
+// 重置复习进度（v0.11）：误点「记住」把档位推进去后的补救路径
+async function resetProgress() {
+  if (!word.value || queueBusy.value) return
+  if (!confirm('把「' + word.value.abbreviation + '」的复习进度清零，当作新词重新开始？')) return
+  queueBusy.value = true
+  try {
+    await resetReviewProgress(word.value.id)
+    word.value = await getWord(word.value.id)   // 重新拉一次，四个复习字段一起刷新
+    toast('复习进度已重置', 'success')
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    queueBusy.value = false
+  }
+}
+
 async function confirmDelete() {
   showConfirm.value = false
+  const snapshot = { ...word.value }      // 删前留快照，用于撤销
   try {
-    await deleteWord(word.value.id)
-    toast('已删除', 'success')
+    await deleteWord(snapshot.id)
+    toast('已删除', 'success', {
+      label: '撤销',
+      handler: async () => {
+        const res = await restoreWords([snapshot])
+        toast(
+          res.restored
+            ? `已恢复「${snapshot.abbreviation}」`
+            : '恢复失败：同名词条已存在',
+          res.restored ? 'success' : 'error',
+        )
+      },
+    })
     router.push('/words')
   } catch (e) {
     toast(e.message, 'error')

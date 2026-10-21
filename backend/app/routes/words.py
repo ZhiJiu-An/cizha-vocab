@@ -2,26 +2,35 @@
 import csv
 import io
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from ..common import normalize_tags, sorted_tag_items, tag_match_expr, today_start
+from ..common import (
+    STAGES_DAYS, normalize_tags, sorted_tag_items, tag_match_expr, today_start,
+)
 from ..database import get_db
 from ..models import Word
-from ..schemas import WordCreate, WordUpdate, WordResponse, WordListResponse, TagItem
+from ..schemas import (
+    BulkIdsIn, BulkRestoreIn, BulkResult, BulkTagIn, RestoreResult, TagItem,
+    WordCreate, WordListResponse, WordLookupResult, WordResponse, WordUpdate,
+)
 
 router = APIRouter(prefix="/api/words", tags=["词条管理"])
 tags_router = APIRouter(prefix="/api/tags", tags=["标签"])
 
 # CSV 列顺序（导入 / 导出统一）
-# 末尾的 note 是 P0-6 补上的：旧版漏了它，导出再导入会静默丢掉所有备注。
-# 旧版 10 列 CSV 仍可导入 —— 见 batch_import 的补齐逻辑。
+# - note 是 v0.8.1 补的：旧版漏了它，导出再导入会静默丢掉所有备注。
+# - review_* 是 v0.11 补的：旧版只导内容不导进度，换机器备份后所有词条会被打回
+#   第 0 档、下次复习日期重置为导入当天，几个月积攒的学习进度白丢。
+# 旧版 10 / 11 列 CSV 仍可导入 —— 缺的列由 _parse_review_fields 按默认值补齐。
 CSV_COLUMNS = [
     "abbreviation", "full_name", "cn_term", "my_meaning", "domain_detail",
     "phonetic_uk", "phonetic_us", "api_meaning", "examples", "tags", "note",
+    "review_stage", "next_review_at", "review_count", "in_review",
 ]
 
 
@@ -87,6 +96,43 @@ def _parse_examples(raw: str) -> list[dict]:
     return _norm_examples([part for part in raw.split("|") if part.strip()])
 
 
+def _parse_int(raw, default: int, lo: int = None, hi: int = None) -> int:
+    """宽松解析整数：空值 / 脏值回落 default，并夹在 [lo, hi] 内"""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if lo is not None:
+        value = max(lo, value)
+    if hi is not None:
+        value = min(hi, value)
+    return value
+
+
+def _parse_datetime(raw, default: datetime) -> datetime:
+    """解析 ISO 日期时间；空值 / 格式错误回落 default"""
+    raw = str(raw or "").strip()
+    if not raw:
+        return default
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return default
+
+
+def _parse_review_fields(data: dict) -> dict:
+    """把 CSV 的复习进度列解析成可直接落库的类型（v0.11）
+
+    旧版 CSV 没有这些列，取到的是空串 → 全部回落默认值，行为与之前一致：
+    第 0 档 / 今天到期 / 复习 0 次 / 在复习队列。
+    """
+    data["review_stage"] = _parse_int(data.get("review_stage"), 0, 0, len(STAGES_DAYS) - 1)
+    data["next_review_at"] = _parse_datetime(data.get("next_review_at"), today_start())
+    data["review_count"] = _parse_int(data.get("review_count"), 0, 0)
+    data["in_review"] = 1 if _parse_int(data.get("in_review"), 1, 0, 1) else 0
+    return data
+
+
 # ========== 增 ==========
 @router.post("", response_model=WordResponse)
 def create_word(word_data: WordCreate, db: Session = Depends(get_db)):
@@ -118,10 +164,10 @@ def create_word(word_data: WordCreate, db: Session = Depends(get_db)):
 def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """CSV 批量导入
 
-    列顺序：abbreviation,full_name,cn_term,my_meaning,domain_detail,phonetic_uk,phonetic_us,api_meaning,examples,tags,note
+    列顺序：abbreviation,full_name,cn_term,my_meaning,domain_detail,phonetic_uk,phonetic_us,api_meaning,examples,tags,note,review_stage,next_review_at,review_count,in_review
     examples 列为 JSON 数组 [{en, zh}] 或 | 分隔的英文句子。
     仅 abbreviation 和 my_meaning 必填；已存在的词条自动跳过。
-    旧版 10 列（无 note）的 CSV 仍可直接导入，缺失列按空串补齐。
+    旧版 10 / 11 列（无 note / 无复习进度）的 CSV 仍可直接导入，缺失列按默认值补齐。
     """
     content = file.file.read().decode("utf-8-sig")
     reader = csv.reader(io.StringIO(content))
@@ -149,7 +195,7 @@ def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
             continue
 
         data["has_abbr"] = _derive_has_abbr(data["full_name"])
-        data["next_review_at"] = today_start()  # 新词默认进复习队列，当天到期
+        data = _parse_review_fields(data)  # 有进度列则恢复，没有则按新词默认值
         word = Word(**data)
         db.add(word)
         db.flush()
@@ -159,6 +205,115 @@ def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
     for w in created:
         db.refresh(w)
     return created
+
+
+# ========== 批量操作（v0.11） ==========
+# 此前批量删除 / 批量加标签只能由前端循环发 N 个单条请求（代码里自己写着「后端无批量接口」），
+# 删 100 条就是 100 次 HTTP 往返，且没有原子性。这里收成单请求 + 单事务。
+def _split_ids(raw_ids: list[int]) -> tuple[list[int], set[int]]:
+    """去重并保留顺序；返回 (去重后的 ids, 集合)"""
+    ids = list(dict.fromkeys(raw_ids))
+    return ids, set(ids)
+
+
+@router.post("/bulk-delete", response_model=BulkResult)
+def bulk_delete(payload: BulkIdsIn, db: Session = Depends(get_db)):
+    """按 id 批量删除，单事务提交"""
+    ids, wanted = _split_ids(payload.ids)
+    words = db.query(Word).filter(Word.id.in_(ids)).all()
+    found = {w.id for w in words}
+    for word in words:
+        db.delete(word)
+    db.commit()
+
+    missing = [i for i in ids if i not in found]
+    return {
+        "requested": len(ids),
+        "succeeded": len(found),
+        "failed": len(missing),
+        "missing_ids": missing,
+    }
+
+
+@router.post("/bulk-tag", response_model=BulkResult)
+def bulk_add_tag(payload: BulkTagIn, db: Session = Depends(get_db)):
+    """批量为词条追加标签（与原有标签合并去重），单事务提交"""
+    new_tags = [t.strip() for t in payload.tags if t and t.strip()]
+    if not new_tags:
+        raise HTTPException(status_code=400, detail="标签不能为空")
+
+    ids, wanted = _split_ids(payload.ids)
+    words = db.query(Word).filter(Word.id.in_(ids)).all()
+    found = {w.id for w in words}
+    for word in words:
+        # 合并后统一走 normalize_tags：去空格、去空项、去重保序
+        word.tags = normalize_tags(f"{word.tags or ''},{','.join(new_tags)}")
+    db.commit()
+
+    missing = [i for i in ids if i not in found]
+    return {
+        "requested": len(ids),
+        "succeeded": len(found),
+        "failed": len(missing),
+        "missing_ids": missing,
+    }
+
+
+# ========== 撤销删除（v0.11） ==========
+@router.post("/restore", response_model=RestoreResult)
+def restore_words(payload: BulkRestoreIn, db: Session = Depends(get_db)):
+    """把刚删除的词条原样回灌（含复习进度与创建时间）
+
+    删除是不可逆的，但「误删」很常见。前端在删除时缓存完整词条 JSON，
+    这里按原样插回：复习档位、下次复习日期、累计次数、创建时间都保留，
+    因此撤销不会把学习进度打回原点；同名词条已存在时跳过，不覆盖。
+    """
+    restored = []
+    skipped = 0
+
+    for item in payload.items:
+        data = _clean(item.model_dump())
+        if not data["abbreviation"] or not data["my_meaning"]:
+            skipped += 1
+            continue
+
+        exists = (
+            db.query(Word)
+            .filter(func.lower(Word.abbreviation) == data["abbreviation"].lower())
+            .first()
+        )
+        if exists:
+            skipped += 1
+            continue
+
+        data["has_abbr"] = _derive_has_abbr(data["full_name"])
+        data["review_stage"] = max(
+            0, min(int(data.get("review_stage") or 0), len(STAGES_DAYS) - 1)
+        )
+        data["review_count"] = max(0, int(data.get("review_count") or 0))
+        data["in_review"] = 1 if data.get("in_review") is None else (1 if data["in_review"] else 0)
+        if data.get("next_review_at") is None:
+            data["next_review_at"] = today_start()
+        # None 时删掉键，让 Column 的默认值生效，而不是写入 NULL
+        for key in ("created_at", "updated_at"):
+            if data.get(key) is None:
+                data.pop(key, None)
+
+        word = Word(**data)
+        db.add(word)
+        db.flush()
+        restored.append(word)
+
+    db.commit()
+    for word in restored:
+        db.refresh(word)
+
+    return {
+        "requested": len(payload.items),
+        "restored": len(restored),
+        "skipped": skipped,
+        "words": restored,
+    }
 
 
 # ========== 导出 ==========
@@ -175,6 +330,10 @@ def export_csv(keyword: str = "", tag: str = "", db: Session = Depends(get_db)):
             w.abbreviation, w.full_name, w.cn_term, w.my_meaning, w.domain_detail,
             w.phonetic_uk, w.phonetic_us, w.api_meaning,
             json.dumps(_norm_examples(w.examples), ensure_ascii=False), w.tags, w.note,
+            w.review_stage or 0,
+            w.next_review_at.isoformat(timespec="seconds") if w.next_review_at else "",
+            w.review_count or 0,
+            1 if w.in_review is None else w.in_review,
         ])
 
     csv_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")
@@ -183,6 +342,26 @@ def export_csv(keyword: str = "", tag: str = "", db: Session = Depends(get_db)):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="danciji_export.csv"'},
     )
+
+
+# ========== 本地库精确查找（v0.11） ==========
+@router.get("/lookup", response_model=WordLookupResult)
+def lookup_word(word: str = "", db: Session = Depends(get_db)):
+    """按缩写精确查找（大小写不敏感），供搜索页判断「是否已收藏」
+
+    在此之前，搜索页查一个早就收藏过的词仍会完整调用一次大模型，点收藏才报
+    「已存在」—— 既费 token 又费时间。不命中返回 200 + found=false：这是搜索页
+    每次都会调的接口，不该走 404 错误分支。
+    """
+    word = (word or "").strip()
+    if not word:
+        return {"found": False, "word": None}
+    hit = (
+        db.query(Word)
+        .filter(func.lower(Word.abbreviation) == word.lower())
+        .first()
+    )
+    return {"found": hit is not None, "word": hit}
 
 
 # ========== 列表 ==========
@@ -279,6 +458,11 @@ def update_word(word_id: int, word_data: WordUpdate, db: Session = Depends(get_d
     # 全称变化后重新推导类型
     if "full_name" in changes:
         word.has_abbr = _derive_has_abbr(word.full_name)
+
+    # 重新加入复习队列时，若从未安排过复习日期则立刻到期（v0.11）；
+    # 已有计划则保留原计划，等同于「恢复」而不是「重学」。
+    if changes.get("in_review") == 1 and not word.next_review_at:
+        word.next_review_at = today_start()
 
     db.commit()
     db.refresh(word)

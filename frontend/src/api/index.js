@@ -22,6 +22,22 @@ export const updateWord = (id, data) => api.put(`/words/${id}`, data).then((r) =
 export const deleteWord = (id) => api.delete(`/words/${id}`).then((r) => r.data)
 export const listTags = () => api.get('/tags').then((r) => r.data)
 
+// 本地库精确查找（v0.11）：搜索页据此判断「是否已收藏」，命中则不调用大模型
+export const findLocalWord = (word) =>
+  api.get('/words/lookup', { params: { word } }).then((r) => r.data)
+
+/* ========= 批量操作（v0.11） ========= */
+// 单请求 + 单事务，替代原来前端循环发 N 个单条请求
+export const bulkDeleteWords = (ids) =>
+  api.post('/words/bulk-delete', { ids }).then((r) => r.data)
+
+export const bulkAddTags = (ids, tags) =>
+  api.post('/words/bulk-tag', { ids, tags }).then((r) => r.data)
+
+// 撤销删除：把删除时缓存的完整词条回灌（含复习进度与创建时间）
+export const restoreWords = (items) =>
+  api.post('/words/restore', { items }).then((r) => r.data)
+
 /* ========= 批量导入 / 导出 ========= */
 export const batchImport = (file) => {
   const form = new FormData()
@@ -61,8 +77,17 @@ export const getDueWords = (params = {}) => api.get('/review/due', { params }).t
 export const submitReviewAnswer = (wordId, result) =>
   api.post(`/review/${wordId}/answer`, { result }).then((r) => r.data)
 
+// 错词本（v0.11）：按「忘记」次数降序，供复习页错词优先与统计页错词榜使用
+export const getMistakes = (params = {}) =>
+  api.get('/review/mistakes', { params }).then((r) => r.data)
+
+// 重置复习进度（v0.11）：把档位 / 下次复习 / 累计次数清零，当作新词重学
+export const resetReviewProgress = (wordId) =>
+  api.post(`/review/${wordId}/reset`).then((r) => r.data)
+
 /* ========= 学习统计 ========= */
-export const getStatsSummary = () => api.get('/stats/summary').then((r) => r.data)
+export const getStatsSummary = (params = {}) =>
+  api.get('/stats/summary', { params }).then((r) => r.data)
 
 /* ========= 大模型配置（kind: text 文本模型 / vision 视觉模型） ========= */
 // 连通测试要真连一次模型，视觉模型还带图，故单独放宽超时

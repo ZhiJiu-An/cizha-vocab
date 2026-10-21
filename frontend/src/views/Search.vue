@@ -20,7 +20,6 @@
           @keydown.enter="doSearch"
           @paste="onPaste"
         >
-        <span class="key">⌘ K</span>
         <button class="ocr-btn" :disabled="ocrLoading" @click="pickImage">
           {{ ocrLoading ? '识别中…' : '📷 图片取词' }}
         </button>
@@ -136,7 +135,32 @@
         <div class="panel panel-llm">
           <div class="panel-head">🤖 大模型 · 领域翻译</div>
           <div class="panel-body">
-            <div v-if="llmError" class="panel-hint">⚠️ {{ llmError }}</div>
+            <!-- 命中本地词库（v0.11）：展示自己的笔记，不再自动调大模型 -->
+            <div v-if="localWord" class="local-hit">
+              <div class="lh-tag">📚 词库中已有这个词</div>
+              <div class="lh-word">{{ localWord.abbreviation }}</div>
+              <div v-if="localWord.cn_term" class="lh-line">
+                <span class="lh-k">中文定名</span>{{ localWord.cn_term }}
+              </div>
+              <div class="lh-line">
+                <span class="lh-k">💡 我的理解</span>{{ localWord.my_meaning }}
+              </div>
+              <div v-if="localWord.domain_detail" class="lh-line lh-detail">
+                <span class="lh-k">🤖 领域详解</span>{{ localWord.domain_detail }}
+              </div>
+              <div v-if="parseTags(localWord.tags).length" class="lh-tags">
+                <span v-for="t in parseTags(localWord.tags)" :key="t" class="card-tag">#{{ t }}</span>
+              </div>
+              <div class="lh-actions">
+                <router-link class="btn btn-outline" :to="`/words/${localWord.id}`">
+                  查看详情 →
+                </router-link>
+                <button class="btn btn-ghost" @click="regenFromLibrary">
+                  🔄 仍然重新生成
+                </button>
+              </div>
+            </div>
+            <div v-else-if="llmError" class="panel-hint">⚠️ {{ llmError }}</div>
             <template v-else>
               <div v-if="!visibleSections.length" class="skeleton" style="padding:0">
                 <div class="sk-line" style="width:30%"></div>
@@ -155,30 +179,58 @@
       </div>
 
       <!-- ===== 收藏栏 ===== -->
-      <div v-if="streamDone" class="fav-bar">
-        <button class="btn btn-fav" :class="{ saved: favSaved }" :disabled="favSaving || favSaved" @click="doFav">
-          {{ favSaved ? '✓ 已收藏到词库' : (favSaving ? '收藏中…' : '⭐ 收藏入词库') }}
+      <div v-if="streamDone || localWord" class="fav-bar">
+        <button
+          class="btn btn-fav"
+          :class="{ saved: favSaved || localWord }"
+          :disabled="favSaving || favSaved || !!localWord"
+          @click="doFav"
+        >
+          {{ localWord ? '✓ 已在词库中' : (favSaved ? '✓ 已收藏到词库' : (favSaving ? '收藏中…' : '⭐ 收藏入词库')) }}
         </button>
-        <button class="btn btn-outline" :disabled="llmStreaming" @click="doRegen">🔄 重新生成</button>
+        <button v-if="!localWord" class="btn btn-outline" :disabled="llmStreaming" @click="doRegen">
+          🔄 重新生成
+        </button>
       </div>
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import Phonetics from '../components/Phonetics.vue'
-import { lookupDictionary, createWord, extractWordsFromImage } from '../api'
-import { toast } from '../utils'
+import { lookupDictionary, createWord, extractWordsFromImage, findLocalWord } from '../api'
+import { parseTags, toast } from '../utils'
+
+const route = useRoute()
 
 const keyword = ref('')
 const searched = ref(false)
 const currentWord = ref('')
 
+/* ---------- 顶栏全局搜索跳转过来时自动查询（v0.11） ----------
+   从任意页面在顶栏搜索 → 跳到 /?q=xxx → 这里接管并立即发起双栏查询。
+   关键词相同时重复提交不会触发（同址导航），此时页面结果本就是该词，无副作用。 */
+function runFromQuery() {
+  const q = String(route.query.q || '').trim()
+  if (!q) return
+  keyword.value = q
+  doSearch()
+}
+
+onMounted(runFromQuery)
+watch(() => route.query.q, runFromQuery)
+
 /* ========= 左栏：词典 ========= */
 const dictLoading = ref(false)
 const dict = ref(null)
 const dictError = ref('')
+
+/* 本地库命中（v0.11）：搜索词已在词库中时，右栏改为展示自己的笔记，
+   并不再自动调用大模型 —— 省一次流式生成和 token */
+const localWord = ref(null)
+let searchSeq = 0
 
 /* ========= 右栏：大模型流式翻译 ========= */
 const llmSections = ref([])
@@ -305,14 +357,48 @@ const visibleSections = computed(() => {
   return out
 })
 
-function doSearch() {
+async function doSearch() {
   const kw = keyword.value.trim()
   if (!kw) return
+  const seq = ++searchSeq
   currentWord.value = kw
   searched.value = true
   favSaved.value = false
+  localWord.value = null
   fetchDict(kw)
+
+  // 先查本地库（本地 SQLite，毫秒级）。命中就展示自己的笔记，不再自动调大模型。
+  let hit = null
+  try {
+    const res = await findLocalWord(kw)
+    hit = res?.found ? res.word : null
+  } catch {
+    hit = null                     // 查本地库失败不影响正常搜索
+  }
+  if (seq !== searchSeq) return    // 已被更新的搜索取代
+
+  if (hit) {
+    localWord.value = hit
+    clearStream()                  // 不调大模型，清空右栏流式状态
+    return
+  }
   streamTranslate(kw)
+}
+
+// 清空右栏流式状态（不动 abortCtrl 之外的东西，供命中本地库时用）
+function clearStream() {
+  abortCtrl?.abort()
+  abortCtrl = null
+  llmSections.value = []
+  llmError.value = ''
+  llmStreaming.value = false
+  streamDone.value = false
+}
+
+// 命中本地库后仍想看大模型解读
+function regenFromLibrary() {
+  localWord.value = null
+  streamTranslate(currentWord.value)
 }
 
 async function fetchDict(word) {

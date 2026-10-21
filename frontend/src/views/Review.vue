@@ -40,6 +40,25 @@
         </div>
       </div>
 
+      <!-- 练习顺序（v0.11）：按历史「忘记」次数优先，针对性重练 -->
+      <div class="review-block">
+        <div class="rb-label">练习顺序</div>
+        <div class="tags">
+          <button
+            class="tag"
+            :class="{ active: order === 'due' }"
+            @click="order = 'due'"
+          >按到期时间</button>
+          <button
+            class="tag"
+            :class="{ active: order === 'mistakes' }"
+            :disabled="mistakeTotal === 0"
+            :title="mistakeTotal === 0 ? '还没有「忘记」记录' : `共 ${mistakeTotal} 个错词`"
+            @click="order = 'mistakes'"
+          >🎯 错词优先{{ mistakeTotal ? `（${mistakeTotal}）` : '' }}</button>
+        </div>
+      </div>
+
       <!-- 数量选择 -->
       <div class="review-block">
         <div class="rb-label">本组数量</div>
@@ -139,7 +158,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import Phonetics from '../components/Phonetics.vue'
 import WordBadge from '../components/WordBadge.vue'
-import { getReviewOverview, getDueWords, submitReviewAnswer, listTags } from '../api'
+import { getReviewOverview, getDueWords, submitReviewAnswer, listTags, getMistakes } from '../api'
 import { toast, parseTags, cardType } from '../utils'
 
 const phase = ref('ready')           // ready / reviewing / done
@@ -147,6 +166,8 @@ const overview = ref({ due_today: 0, reviewed_today: 0, total_in_queue: 0 })
 const tags = ref([])
 const selectedTags = ref([])
 const count = ref(20)
+const order = ref('due')          // due=按到期时间 / mistakes=错词优先（v0.11）
+const mistakeTotal = ref(0)       // 错词本里的词条数，用于禁用按钮与显示计数
 
 const queue = ref([])                // 本组词条队列
 const currentIndex = ref(0)
@@ -162,9 +183,14 @@ const wordTags = computed(() => parseTags(currentWord.value.tags))
 
 async function loadReady() {
   try {
-    const [ov, tg] = await Promise.all([getReviewOverview(), listTags()])
+    const [ov, tg, mt] = await Promise.all([
+      getReviewOverview(),
+      listTags(),
+      getMistakes({ limit: 1 }),   // 只关心 total
+    ])
     overview.value = ov
     tags.value = tg
+    mistakeTotal.value = mt.total || 0
   } catch (e) {
     toast(e.message, 'error')
   }
@@ -178,21 +204,28 @@ function toggleTag(name) {
 
 // 拉取到期词条：多标签时逐标签请求后合并去重（后端 /due 只支持单标签）
 async function fetchDue() {
+  const params = { limit: count.value, order: order.value }
+
   if (!selectedTags.value.length) {
-    const res = await getDueWords({ limit: count.value })
+    const res = await getDueWords(params)
     return res.items
   }
+
+  // 多标签时后端只支持单标签，逐标签请求后合并去重。
+  // 每个标签内部已按所选顺序排好，合并时保持首次出现的顺序即可
+  // （跨标签的全局严格排序需要后端支持多标签，暂不引入）。
   const results = await Promise.all(
-    selectedTags.value.map((t) => getDueWords({ tag: t, limit: count.value })),
+    selectedTags.value.map((t) => getDueWords({ ...params, tag: t })),
   )
   const seen = new Map()
   for (const r of results) {
     for (const w of r.items) if (!seen.has(w.id)) seen.set(w.id, w)
   }
-  // 按到期时间升序（最久没复习的排前面），截取本组数量
-  return [...seen.values()]
-    .sort((a, b) => new Date(a.next_review_at) - new Date(b.next_review_at))
-    .slice(0, count.value)
+  const merged = [...seen.values()]
+  if (order.value !== 'mistakes') {
+    merged.sort((a, b) => new Date(a.next_review_at) - new Date(b.next_review_at))
+  }
+  return merged.slice(0, count.value)
 }
 
 async function start() {

@@ -5,7 +5,7 @@
 """
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -16,15 +16,26 @@ from ..schemas import StatsSummary
 
 router = APIRouter(prefix="/api/stats", tags=["学习统计"])
 
-TAG_LIMIT = 8   # 标签分布最多展示条数
-TREND_DAYS = 7  # 趋势图天数（含今天）
+TAG_LIMIT = 8           # 标签分布最多展示条数
+DEFAULT_TREND_DAYS = 7  # 趋势图默认天数（含今天）
+MAX_TREND_DAYS = 365    # 趋势图可选的最大天数
+DAILY_LIMIT = 31        # 超过这个天数改为按周聚合，避免几十根柱子挤成一团
 
 
 @router.get("/summary", response_model=StatsSummary)
-def get_summary(db: Session = Depends(get_db)):
-    """学习统计总览"""
+def get_summary(
+    days: int = Query(DEFAULT_TREND_DAYS, ge=1, le=MAX_TREND_DAYS),
+    db: Session = Depends(get_db),
+):
+    """学习统计总览
+
+    days 只影响趋势图窗口（v0.11）：≤31 天按天聚合，更长区间按周聚合
+    （每 7 天一个桶、从窗口起点对齐），免得 90 根柱子挤成一团。
+    概览里的「近 7 天新增」有自己固定的口径，不受 days 影响。
+    """
     day_start = today_start()
-    week_start = day_start - timedelta(days=TREND_DAYS - 1)  # 含今天共 7 天
+    trend_start = day_start - timedelta(days=days - 1)
+    week_start = day_start - timedelta(days=6)  # 固定「近 7 天新增」口径
 
     # ---- 概览数字 ----
     total_words = db.query(Word).count()
@@ -50,7 +61,7 @@ def get_summary(db: Session = Depends(get_db)):
     review_day = func.strftime("%Y-%m-%d", ReviewLog.reviewed_at)
     review_by_day = dict(
         db.query(review_day, func.count())
-        .filter(ReviewLog.reviewed_at >= week_start)
+        .filter(ReviewLog.reviewed_at >= trend_start)
         .group_by(review_day)
         .all()
     )
@@ -58,21 +69,40 @@ def get_summary(db: Session = Depends(get_db)):
     created_day = func.strftime("%Y-%m-%d", Word.created_at)
     new_by_day = dict(
         db.query(created_day, func.count())
-        .filter(Word.created_at >= week_start)
+        .filter(Word.created_at >= trend_start)
         .group_by(created_day)
         .all()
     )
 
-    # Python 侧只负责把 7 天序列补零铺平
-    daily_trend = []
-    for i in range(TREND_DAYS):
-        day = week_start + timedelta(days=i)
+    # SQL 只负责按天计数；铺平与「按周合并」都在 Python 侧完成
+    per_day = []
+    for i in range(days):
+        day = trend_start + timedelta(days=i)
         key = day.strftime("%Y-%m-%d")
-        daily_trend.append({
+        per_day.append((day, new_by_day.get(key, 0), review_by_day.get(key, 0)))
+
+    granularity = "day" if days <= DAILY_LIMIT else "week"
+    if granularity == "day":
+        buckets = per_day
+    else:
+        # 每 7 天一个桶，桶标签取桶内第一天
+        buckets = []
+        for offset in range(0, days, 7):
+            chunk = per_day[offset:offset + 7]
+            buckets.append((
+                chunk[0][0],
+                sum(item[1] for item in chunk),
+                sum(item[2] for item in chunk),
+            ))
+
+    daily_trend = [
+        {
             "date": f"{day.month:02d}-{day.day:02d}",
-            "new_words": new_by_day.get(key, 0),
-            "reviews": review_by_day.get(key, 0),
-        })
+            "new_words": new_count,
+            "reviews": review_count,
+        }
+        for day, new_count, review_count in buckets
+    ]
 
     # ---- 复习档位分布（恒 6 档，无词补 0）----
     stage_rows = (
@@ -101,4 +131,6 @@ def get_summary(db: Session = Depends(get_db)):
         "tag_distribution": tag_distribution,
         "daily_trend": daily_trend,
         "stage_distribution": stage_distribution,
+        "trend_days": days,
+        "trend_granularity": granularity,
     }

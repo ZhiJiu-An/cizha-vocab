@@ -189,7 +189,10 @@ import { useRoute, useRouter } from 'vue-router'
 import Phonetics from '../components/Phonetics.vue'
 import WordBadge from '../components/WordBadge.vue'
 import WordQuickView from '../components/WordQuickView.vue'
-import { batchImport, deleteWord, exportCsvUrl, listTags, listWords, updateWord } from '../api'
+import {
+  batchImport, bulkAddTags, bulkDeleteWords, deleteWord, exportCsvUrl,
+  listTags, listWords, restoreWords,
+} from '../api'
 import { cardType, parseTags, relativeTime, toast } from '../utils'
 
 const route = useRoute()
@@ -313,54 +316,86 @@ function selectAll() {
     : words.value.map((w) => w.id)
 }
 
-// 后端无批量接口：循环单条请求，allSettled 统计成败，单条失败不拖垮整批
+// 去掉列表内部的辅助字段（_type 只用于渲染），得到可回灌的原始词条
+function plain(item) {
+  const { _type, ...rest } = item
+  return rest
+}
+
+// 撤销删除：把删除前的快照原样回灌（复习进度、创建时间都保留）
+async function undoDelete(snapshots) {
+  try {
+    const res = await restoreWords(snapshots)
+    toast(
+      res.skipped
+        ? `已恢复 ${res.restored} 条（${res.skipped} 条同名词条已存在，已跳过）`
+        : `已恢复 ${res.restored} 条`,
+      'success',
+    )
+    await Promise.all([loadWords(), loadTags()])
+  } catch (e) {
+    toast(e.message || '撤销失败', 'error')
+  }
+}
+
+// v0.11：走单请求 + 单事务（原来这里是 Promise.allSettled 循环发 N 个请求）
 async function batchDelete() {
   batchConfirm.value = false
   batchBusy.value = true
   const ids = [...selected.value]
-  const results = await Promise.allSettled(ids.map((id) => deleteWord(id)))
-  const ok = results.filter((r) => r.status === 'fulfilled').length
-  batchBusy.value = false
-  toast(
-    ok === ids.length ? `已删除 ${ok} 条` : `删除完成：成功 ${ok} 条，失败 ${ids.length - ok} 条`,
-    ok === ids.length ? 'success' : 'error',
-  )
-  selectMode.value = false
-  selected.value = []
-  await Promise.all([loadWords(), loadTags()])
+  const snapshots = displayWords.value.filter((w) => ids.includes(w.id)).map(plain)
+  try {
+    const res = await bulkDeleteWords(ids)
+    toast(
+      res.failed
+        ? `已删除 ${res.succeeded} 条，${res.failed} 条未找到`
+        : `已删除 ${res.succeeded} 条`,
+      res.failed ? 'error' : 'success',
+      res.succeeded ? { label: '撤销', handler: () => undoDelete(snapshots) } : null,
+    )
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    batchBusy.value = false
+    selectMode.value = false
+    selected.value = []
+    await Promise.all([loadWords(), loadTags()])
+  }
 }
 
-// 追加式加标签：与原有标签合并去重，部分更新只传 tags 字段
+// 追加式加标签：合并去重交给后端（normalize_tags），单请求 + 单事务
 async function batchAddTags() {
   const newTags = tagInput.value.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean)
   if (!newTags.length) return
   tagEditor.value = false
   batchBusy.value = true
-  const targets = words.value.filter((w) => selected.value.includes(w.id))
-  const results = await Promise.allSettled(
-    targets.map((w) => {
-      const merged = [...new Set([...parseTags(w.tags), ...newTags])]
-      return updateWord(w.id, { tags: merged.join(',') })
-    }),
-  )
-  const ok = results.filter((r) => r.status === 'fulfilled').length
-  batchBusy.value = false
-  tagInput.value = ''
-  toast(
-    ok === targets.length ? `已为 ${ok} 条添加标签` : `添加完成：成功 ${ok} 条，失败 ${targets.length - ok} 条`,
-    ok === targets.length ? 'success' : 'error',
-  )
-  selectMode.value = false
-  selected.value = []
-  await Promise.all([loadWords(), loadTags()])
+  const ids = [...selected.value]
+  try {
+    const res = await bulkAddTags(ids, newTags)
+    toast(
+      res.failed
+        ? `已为 ${res.succeeded} 条添加标签，${res.failed} 条未找到`
+        : `已为 ${res.succeeded} 条添加标签`,
+      res.failed ? 'error' : 'success',
+    )
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    batchBusy.value = false
+    tagInput.value = ''
+    selectMode.value = false
+    selected.value = []
+    await Promise.all([loadWords(), loadTags()])
+  }
 }
 
 async function confirmDelete() {
   const target = pendingDelete.value
   pendingDelete.value = null
+  const snapshot = plain(target)          // 删前留快照，用于撤销
   try {
     await deleteWord(target.id)
-    toast('已删除', 'success')
+    toast('已删除', 'success', { label: '撤销', handler: () => undoDelete([snapshot]) })
     await Promise.all([loadWords(), loadTags()])
   } catch (e) {
     toast(e.message, 'error')
