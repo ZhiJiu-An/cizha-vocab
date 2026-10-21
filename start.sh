@@ -5,7 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-PORT="${DANCIJI_PORT:-8000}"
+# 端口与自动开浏览器：新名 CIZHA_* 为准，DANCIJI_* 保留一版兼容
+PORT="${CIZHA_PORT:-${DANCIJI_PORT:-8000}}"
 URL="http://127.0.0.1:${PORT}"
 PY="$ROOT/backend/venv/bin/python"
 
@@ -31,7 +32,7 @@ fi
 if (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null; then
   echo "错误：端口 ${PORT} 已被占用，未启动。" >&2
   echo "  可能已经有一个实例在运行：${URL}" >&2
-  echo "  换个端口：DANCIJI_PORT=8001 ./start.sh" >&2
+  echo "  换个端口：CIZHA_PORT=8001 ./start.sh" >&2
   exit 1
 fi
 
@@ -57,7 +58,7 @@ open_when_ready() {
   echo "提示：服务未在 20 秒内就绪，请检查上面的日志。" >&2
 }
 
-if [ "${DANCIJI_NO_OPEN:-}" != "1" ]; then
+if [ "${CIZHA_NO_OPEN:-${DANCIJI_NO_OPEN:-}}" != "1" ]; then
   open_when_ready &
 fi
 

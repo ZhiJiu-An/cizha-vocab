@@ -149,6 +149,22 @@ class TestCsv(ApiTestCase):
         self.assertEqual(resp.json()[0]["note"], "")
         self.assertEqual(resp.json()[0]["tags"], "oldtag")
 
+    def test_oversized_csv_rejected_before_full_read(self):
+        """v0.14：CSV 与 OCR 同口径限 10MB，超限返回 400 而非读爆内存"""
+        big = b"a," * (5 * 1024 * 1024 + 1)  # 10MB + 2 字节
+        self.assertGreater(len(big), 10 * 1024 * 1024)
+        resp = self.client.post("/api/words/batch", files={"file": ("big.csv", big, "text/csv")})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("10MB", resp.json()["detail"])
+
+    def test_csv_exactly_at_limit_accepted(self):
+        # 恰好在上限内的文件不被误伤
+        row = b"atlimit,,,x,,,,,[],,\n"
+        payload = row * ((10 * 1024 * 1024) // len(row))
+        self.assertLessEqual(len(payload), 10 * 1024 * 1024)
+        resp = self.client.post("/api/words/batch", files={"file": ("ok.csv", payload, "text/csv")})
+        self.assertEqual(resp.status_code, 200, resp.text)
+
 
 class TestKeywordEscaping(ApiTestCase):
     """P0-7：关键词里的 LIKE 通配符必须按字面处理"""

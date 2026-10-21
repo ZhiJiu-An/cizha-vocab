@@ -1,6 +1,6 @@
 <div align="center">
 
-# 拾词 Lexi
+# 词札单词库
 
 **查得到 · 记得下 · 找得快**
 
@@ -10,8 +10,9 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.5-42B883?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
-[![Tests](https://img.shields.io/badge/tests-202%20passed-34674f?style=flat-square)](backend/tests)
+[![Tests](https://img.shields.io/badge/tests-204%20passed-34674f?style=flat-square)](backend/tests)
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230?style=flat-square)](https://github.com/astral-sh/ruff)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](LICENSE)
 
 </div>
 
@@ -44,7 +45,7 @@
 - 词典告诉你：`n. 代币；象征；凭证`
 - 你真正需要的是：`词元 —— LLM 处理文本的最小单位`
 
-拾词把这两份答案放在同一页：左边查词典，右边让大模型按你的领域给出解读。查完一键收藏，之后用间隔重复复习，再用全局搜索随时找回来。
+词札把这两份答案放在同一页：左边查词典，右边让大模型按你的领域给出解读。查完一键收藏，之后用间隔重复复习，再用全局搜索随时找回来。
 
 **核心流程**：`查词 → 双源对照 → 收藏 → 复习 → 统计`
 
@@ -54,11 +55,11 @@
 
 | 词典双栏查询 | 词库 |
 |:---:|:---:|
-| ![词典](./展示图/词典.png) | ![词库](./展示图/词库.png) |
+| ![词典](assets/screenshots/dictionary.png) | ![词库](assets/screenshots/words.png) |
 
 | 复习翻卡 | 学习统计 |
 |:---:|:---:|
-| ![复习](./展示图/复习.png) | ![统计](./展示图/统计.png) |
+| ![复习](assets/screenshots/review.png) | ![统计](assets/screenshots/stats.png) |
 
 ---
 
@@ -131,8 +132,8 @@
 macOS / Linux：
 
 ```bash
-git clone https://github.com/<your-name>/DanCiJi.git
-cd DanCiJi
+git clone https://github.com/ZhiJiu-An/cizha-vocab.git
+cd cizha-vocab
 
 ./setup.sh          # 创建 venv、安装前后端依赖、构建前端
 # 编辑 backend/.env，填入 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
@@ -143,8 +144,8 @@ Windows：双击 `setup.bat`，编辑 `backend\.env`，再双击 `start.bat`。
 
 - `setup` 脚本会检查 Python / Node 版本，自动创建 `backend/venv`、安装后端依赖、执行 `npm install` 与 `npm run build`，首次运行时从 `.env.example` 生成 `backend/.env`
 - 重复运行是安全的：已有的 `backend/venv` 会复用，`backend/.env` 不会被覆盖
-- `start` 脚本发现前端未构建时会自动补建，**启动前先检查端口占用**（被占用时直接报错退出，不会让浏览器打开一个旧实例），后端能响应 `/api/health` 后才打开浏览器（macOS / Linux 可用 `DANCIJI_NO_OPEN=1` 关闭自动打开）
-- 换端口：`DANCIJI_PORT=8001 ./start.sh`（Windows 设置环境变量 `DANCIJI_PORT` 后运行 `start.bat`）
+- `start` 脚本发现前端未构建时会自动补建，**启动前先检查端口占用**（被占用时直接报错退出，不会让浏览器打开一个旧实例），后端能响应 `/api/health` 后才打开浏览器（可用 `CIZHA_NO_OPEN=1` 关闭自动打开）
+- 换端口：`CIZHA_PORT=8001 ./start.sh`（Windows 设置环境变量 `CIZHA_PORT` 后运行 `start.bat`）
 
 访问 <http://127.0.0.1:8000>。
 
@@ -179,8 +180,8 @@ setup.bat
 ### 手动安装（开发模式）
 
 ```bash
-git clone https://github.com/<your-name>/DanCiJi.git
-cd DanCiJi/backend
+git clone https://github.com/ZhiJiu-An/cizha-vocab.git
+cd cizha-vocab/backend
 
 python3 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
@@ -230,8 +231,8 @@ npm run build      # 产物输出到 frontend/dist
 | `LLM_VISION_MODEL` | 否 | 视觉模型名；未配置时图片取词返回明确提示 |
 | `LLM_VISION_BASE_URL` | 否 | 留空回落到 `LLM_BASE_URL` |
 | `LLM_VISION_API_KEY` | 否 | 留空回落到 `LLM_API_KEY` |
-| `DANCIJI_ALLOWED_ORIGINS` | 否 | CORS 白名单，逗号分隔 |
-| `DANCIJI_DB_PATH` | 否 | 覆盖 SQLite 数据库路径 |
+| `CIZHA_ALLOWED_ORIGINS` | 否 | CORS 白名单，逗号分隔 |
+| `CIZHA_DB_PATH` | 否 | 覆盖 SQLite 数据库路径 |
 
 视觉模型回落链：**运行时视觉配置 > `LLM_VISION_*` > 默认文本模型**。DeepSeek 官方 API 不支持图片输入，图片取词需要另配视觉服务。
 
@@ -284,11 +285,11 @@ npm run build      # 产物输出到 frontend/dist
 
 | 数据 | 位置 |
 |---|---|
-| 词条、复习排期、复习日志 | `backend/data/danciji.db` |
+| 词条、复习排期、复习日志 | `backend/data/cizha.db` |
 | 模型配置（含明文 Key） | `backend/data/llm_config.json` |
 | 偏好设置（昵称 / 口音 / 提醒） | 浏览器 localStorage |
 
-- **完整备份**：直接复制 `backend/data/danciji.db`
+- **完整备份**：直接复制 `backend/data/cizha.db`
 - **CSV**：仅包含词条与当前复习进度，不含逐次复习历史；适合迁移词库，不等同于完整备份
 - **删除语义**：删除词条会同时清理其复习日志；撤销删除恢复内容与当前排期，但累计复习次数归零
 
@@ -297,7 +298,7 @@ npm run build      # 产物输出到 frontend/dist
 ## 项目结构
 
 ```text
-DanCiJi/
+cizha-vocab/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py            # 入口：CORS、迁移、路由注册
@@ -314,7 +315,7 @@ DanCiJi/
 │       ├── api/               # 接口封装
 │       └── utils/             # toast / 偏好 / 发音
 ├── docs/versions/             # 历史版本文档
-├── 展示图/                    # README 截图
+├── assets/screenshots/        # README 界面截图
 ├── setup.sh / setup.bat       # 一键安装依赖
 ├── start.sh / start.bat       # 一键启动（单端口 8000）
 ├── MVP.md                     # 功能规格与验收标准
@@ -339,7 +340,7 @@ cd ../frontend && npm run build
 ```
 
 - 每个测试用例使用独立的内存 SQLite，不会改动真实数据
-- 测试入口会在导入应用前把 `DANCIJI_DB_PATH` 指向临时文件
+- 测试入口会在导入应用前把 `CIZHA_DB_PATH` 指向临时文件
 - CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)：推送 `main` 或提交 PR 时自动执行 ruff + 全量测试
 
 详细覆盖范围见 [backend/tests/README.md](backend/tests/README.md)。
@@ -375,7 +376,9 @@ cd ../frontend && npm run build
 
 ## License
 
-当前仓库尚未添加 `LICENSE` 文件。正式开源前请补充许可证（MIT 或 Apache-2.0 均可）；在添加之前，默认保留所有权利。
+本项目基于 [Apache License 2.0](LICENSE) 开源。
+
+概要：可自由使用、修改与分发（包括商用），分发时须保留版权与许可声明、标注修改之处；贡献者同时授予专利许可；不授予商标使用权。
 
 ---
 

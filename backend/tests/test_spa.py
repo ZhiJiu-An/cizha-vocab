@@ -16,7 +16,7 @@ from tests.helpers import make_client
 
 def make_dist() -> Path:
     """造一个最小可用的假 dist：index.html + assets/app.js + favicon.svg"""
-    root = Path(tempfile.mkdtemp(prefix="danciji-dist-"))
+    root = Path(tempfile.mkdtemp(prefix="cizha-dist-"))
     (root / "index.html").write_text("<!doctype html><title>spa</title>", encoding="utf-8")
     (root / "assets").mkdir()
     (root / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
@@ -92,7 +92,7 @@ class TestHealthEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
         self.assertEqual(body["version"], APP_VERSION)
-        self.assertEqual(body["name"], "DanCiJi")
+        self.assertEqual(body["name"], APP_NAME)
         self.assertEqual(body["docs"], "/docs")
         self.assertIn("message", body)
 
@@ -116,4 +116,4 @@ class TestVersionConsistency(unittest.TestCase):
         self.assertTrue(all(p.isdigit() for p in parts), APP_VERSION)
 
     def test_app_name_matches(self):
-        self.assertEqual(APP_NAME, "DanCiJi 术语记录本")
+        self.assertEqual(APP_NAME, "词札单词库")
