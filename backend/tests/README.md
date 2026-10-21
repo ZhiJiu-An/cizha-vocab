@@ -17,9 +17,9 @@ cd backend && pytest -q
 
 ## 隔离性
 
-- `tests/__init__.py` 在**任何** `app.*` 被导入之前把 `DANCIJI_DB_PATH` 指向临时文件 ——
+- `tests/__init__.py` 在**任何** `app.*` 被导入之前把 `CIZHA_DB_PATH` 指向临时文件 ——
   因为 `app/main.py` 在 import 阶段就会执行 `create_all()` 与 `_migrate()`，
-  不先隔离的话跑一次测试就会改动真实的 `data/danciji.db`。
+  不先隔离的话跑一次测试就会改动真实的 `data/cizha.db`。
 - 每个用例再通过 `make_client()` 拿到一份**独占的内存 SQLite**，并覆盖 FastAPI 的
   `get_db` 依赖，用例之间互不影响。
 

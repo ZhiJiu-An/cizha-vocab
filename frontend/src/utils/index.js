@@ -93,14 +93,14 @@ export function nextReviewLabel(iso) {
  * - 其余情况（页面可见 / 未授权 / 浏览器不支持）→ 回落应用内 toast。
  * 通知构造失败也回落 toast，绝不因为通知异常吞掉提醒。
  */
-export function deliverReminder(message, title = '拾词 Lexi · 学习提醒') {
+export function deliverReminder(message, title = '词札单词库 · 学习提醒') {
   const supported = typeof Notification !== 'undefined'
   const granted = supported && Notification.permission === 'granted'
   const hidden = typeof document !== 'undefined' && document.hidden
 
   if (hidden && granted) {
     try {
-      new Notification(title, { body: message, tag: 'danciji-reminder' })
+      new Notification(title, { body: message, tag: 'cizha-reminder' })
       return 'notification'
     } catch {
       /* 落到下面的 toast */

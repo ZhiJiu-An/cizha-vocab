@@ -3,7 +3,7 @@
     <aside class="sidebar">
       <router-link to="/" class="logo">
         <span class="icon">✳</span>
-        <b>拾词<span>Lexi</span></b>
+        <b>词札<span>单词库</span></b>
       </router-link>
       <div class="workspace">PERSONAL WORKSPACE</div>
       <nav>
@@ -125,7 +125,7 @@ async function refreshDue() {
 }
 
 // 学习提醒：页面保持打开时，到点后 1 小时内提醒一次，每天最多一次
-const REMIND_KEY = 'danciji_reminded_on'
+const REMIND_KEY = 'cizha_reminded_on'
 
 function checkReminder() {
   const { enabled, time } = prefs.reminder

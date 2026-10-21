@@ -27,6 +27,7 @@ tags_router = APIRouter(prefix="/api/tags", tags=["标签"])
 # - review_* 是 v0.11 补的：旧版只导内容不导进度，换机器备份后所有词条会被打回
 #   第 0 档、下次复习日期重置为导入当天，几个月积攒的学习进度白丢。
 # 旧版 10 / 11 列 CSV 仍可导入 —— 缺的列由 _parse_review_fields 按默认值补齐。
+MAX_CSV_SIZE = 10 * 1024 * 1024  # 10MB 上限，与 OCR 图片口径一致（v0.14）
 CSV_COLUMNS = [
     "abbreviation", "full_name", "cn_term", "my_meaning", "domain_detail",
     "phonetic_uk", "phonetic_us", "api_meaning", "examples", "tags", "note",
@@ -168,8 +169,12 @@ def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
     examples 列为 JSON 数组 [{en, zh}] 或 | 分隔的英文句子。
     仅 abbreviation 和 my_meaning 必填；已存在的词条自动跳过。
     旧版 10 / 11 列（无 note / 无复习进度）的 CSV 仍可直接导入，缺失列按默认值补齐。
+    v0.14：限 10MB（与 OCR 同口径），只读到上限 +1 字节即停，不整体读入。
     """
-    content = file.file.read().decode("utf-8-sig")
+    raw = file.file.read(MAX_CSV_SIZE + 1)
+    if len(raw) > MAX_CSV_SIZE:
+        raise HTTPException(status_code=400, detail="CSV 文件过大，请控制在 10MB 以内")
+    content = raw.decode("utf-8-sig")
     reader = csv.reader(io.StringIO(content))
 
     created = []
@@ -350,7 +355,7 @@ def export_csv(keyword: str = "", tag: str = "", db: Session = Depends(get_db)):
     return Response(
         content=csv_bytes,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="danciji_export.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="cizha_export.csv"'},
     )
 
 

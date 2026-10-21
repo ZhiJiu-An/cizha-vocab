@@ -12,7 +12,7 @@ from .routes import words, dictionary, translate, stats, ocr, review, llm_config
 
 # 版本号只在这里定义一次，/api/health 与根路径兜底都引用它
 APP_VERSION = "0.14.0"
-APP_NAME = "DanCiJi 术语记录本"
+APP_NAME = "词札单词库"
 
 # 加载 backend/.env 中的环境变量（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 等）
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -94,14 +94,18 @@ _migrate()
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
 # 跨域（Vue 前端在另一端口）
-# v0.13：不再全开放。默认只允许本地开发/预览端口，可用 DANCIJI_ALLOWED_ORIGINS
-# （逗号分隔）覆盖，部署到其他域名时无需改代码。
+# v0.13：不再全开放。默认只允许本地开发/预览端口，可用 CIZHA_ALLOWED_ORIGINS
+# （逗号分隔）覆盖，部署到其他域名时无需改代码。旧名 DANCIJI_ALLOWED_ORIGINS 兼容一版。
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:4173,http://127.0.0.1:4173"
+)
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.environ.get(
-        "DANCIJI_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,"
-        "http://localhost:4173,http://127.0.0.1:4173",
+    for origin in (
+        os.environ.get("CIZHA_ALLOWED_ORIGINS")
+        or os.environ.get("DANCIJI_ALLOWED_ORIGINS")   # 旧名兼容，v0.14 后弃用
+        or DEFAULT_ALLOWED_ORIGINS
     ).split(",")
     if origin.strip()
 ]
@@ -127,7 +131,7 @@ app.include_router(llm_config.router)
 @app.get("/api/health")
 def health():
     return {
-        "name": "DanCiJi",
+        "name": APP_NAME,
         "version": APP_VERSION,
         "docs": "/docs",
         "message": "面向技术从业者的术语 / 单词记录本",
@@ -165,7 +169,7 @@ else:
     def root():
         """未构建前端时的兜底信息页（开发 / CI 环境）"""
         return {
-            "name": "DanCiJi",
+            "name": APP_NAME,
             "version": APP_VERSION,
             "docs": "/docs",
             "message": "面向技术从业者的术语 / 单词记录本（前端未构建，请运行 ./setup.sh 或 npm run build）",

@@ -18,13 +18,13 @@
         <div class="set-row">
           <div class="set-info">
             <b>昵称</b>
-            <small>最多 16 个字符，留空则显示「拾词学习者」</small>
+            <small>最多 16 个字符，留空则显示「词札学习者」</small>
           </div>
           <input
             v-model="prefs.nickname"
             class="set-input"
             maxlength="16"
-            placeholder="拾词学习者"
+            placeholder="词札学习者"
           />
         </div>
       </div>

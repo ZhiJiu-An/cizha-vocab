@@ -6,6 +6,8 @@ cd /d "%~dp0"
 rem 下载源：可用环境变量覆盖（pip 与 npm 原生支持这两个变量）
 if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.org/simple"
 if not defined npm_config_registry set "npm_config_registry=https://registry.npmjs.org"
+if not defined CIZHA_PORT if defined DANCIJI_PORT set "CIZHA_PORT=%DANCIJI_PORT%"
+if not defined CIZHA_PORT set "CIZHA_PORT=8000"
 
 echo ==^> 检查环境
 
@@ -66,7 +68,7 @@ if not exist backend\.env (
 echo.
 echo 安装完成。下一步：
 echo   1. 编辑 backend\.env 填入模型配置（图片取词还需配置视觉模型）
-echo   2. 双击 start.bat 启动，浏览器访问 http://127.0.0.1:8000
+echo   2. 双击 start.bat 启动，浏览器访问 http://127.0.0.1:%CIZHA_PORT%
 pause
 exit /b 0
 
