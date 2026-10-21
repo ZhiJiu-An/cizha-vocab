@@ -19,8 +19,13 @@
         <option value="alpha_desc">字母 Z → A</option>
       </select>
       <span class="count">共 {{ total }} 条</span>
-      <button class="btn btn-outline" @click="triggerImport">📥 导入 CSV</button>
-      <button class="btn btn-outline" @click="doExport">📤 导出 CSV</button>
+      <button class="btn btn-outline" :class="{ 'mode-on': selectMode }" @click="toggleMode">
+        {{ selectMode ? '退出多选' : '☑ 多选' }}
+      </button>
+      <template v-if="!selectMode">
+        <button class="btn btn-outline" @click="triggerImport">📥 导入 CSV</button>
+        <button class="btn btn-outline" @click="doExport">📤 导出 CSV</button>
+      </template>
       <input ref="fileInput" type="file" accept=".csv" style="display: none" @change="onImport" />
     </div>
 
@@ -46,9 +51,10 @@
         v-for="w in displayWords"
         :key="w.id"
         class="card"
-        :class="w._type.cls"
-        @click="router.push(`/words/${w.id}`)"
+        :class="[w._type.cls, { selectable: selectMode, selected: selected.includes(w.id) }]"
+        @click="onCardClick(w)"
       >
+        <span v-if="selectMode" class="check" :class="{ on: selected.includes(w.id) }">✓</span>
         <div class="card-head">
           <span class="card-abbr">
             {{ w.abbreviation }}
@@ -59,7 +65,7 @@
           <span v-if="w.cn_term" class="card-cn">{{ w.cn_term }}</span>
 
           <!-- 音标紧跟主词 -->
-          <Phonetics :uk="w.phonetic_uk" :us="w.phonetic_us" />
+          <Phonetics :uk="w.phonetic_uk" :us="w.phonetic_us" :word="w.abbreviation" />
 
           <span v-if="w.full_name" class="card-full">{{ w.full_name }}</span>
           <span class="card-spacer"></span>
@@ -80,7 +86,7 @@
             <span v-for="t in parseTags(w.tags)" :key="t" class="card-tag">#{{ t }}</span>
           </div>
           <span class="card-time">{{ relativeTime(w.created_at) }}</span>
-          <div class="card-actions">
+          <div v-if="!selectMode" class="card-actions">
             <button
               class="btn btn-ghost btn-sm"
               @click.stop="router.push(`/words/${w.id}/edit`)"
@@ -105,6 +111,62 @@
       </button>
     </div>
 
+    <!-- 悬浮详情窗：点卡片就地预览，不再跳转路由 -->
+    <WordQuickView
+      v-if="activeId"
+      :word-id="activeId"
+      @close="activeId = null"
+      @delete="onQuickDelete"
+    />
+
+    <!-- 批量操作栏：多选模式固定在底部 -->
+    <div v-if="selectMode" class="batch-bar">
+      <span class="bb-count">已选 <b>{{ selected.length }}</b> 条</span>
+      <button class="bb-link" @click="selectAll">{{ selected.length === words.length ? '清空' : '全选' }}</button>
+      <span class="bb-spacer"></span>
+      <button class="btn btn-outline" :disabled="!selected.length || batchBusy" @click="tagEditor = true">
+        🏷️ 添加标签
+      </button>
+      <button class="btn btn-danger-ghost" :disabled="!selected.length || batchBusy" @click="batchConfirm = true">
+        🗑 批量删除
+      </button>
+      <button class="btn btn-ghost" @click="toggleMode">取消</button>
+    </div>
+
+    <!-- 批量加标签弹窗 -->
+    <div v-if="tagEditor" class="modal-mask" @click.self="tagEditor = false">
+      <div class="modal">
+        <h3>为 {{ selected.length }} 条词条添加标签</h3>
+        <input
+          v-model="tagInput"
+          class="batch-tag-input"
+          placeholder="输入标签，多个用逗号分隔，如：LLM, 论文"
+          autofocus
+          @keydown.enter="batchAddTags"
+        />
+        <div class="modal-actions">
+          <button class="btn btn-ghost" @click="tagEditor = false">取消</button>
+          <button class="btn btn-primary" :disabled="!tagInput.trim() || batchBusy" @click="batchAddTags">
+            {{ batchBusy ? '处理中…' : '添加' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量删除确认 -->
+    <div v-if="batchConfirm" class="modal-mask" @click.self="batchConfirm = false">
+      <div class="modal">
+        <h3>批量删除</h3>
+        <p>确定要删除选中的 {{ selected.length }} 条词条吗？此操作不可恢复。</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" @click="batchConfirm = false">取消</button>
+          <button class="btn btn-primary" style="background: #dc2626" :disabled="batchBusy" @click="batchDelete">
+            {{ batchBusy ? '删除中…' : '删除' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 删除确认 -->
     <div v-if="pendingDelete" class="modal-mask" @click.self="pendingDelete = null">
       <div class="modal">
@@ -126,7 +188,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Phonetics from '../components/Phonetics.vue'
 import WordBadge from '../components/WordBadge.vue'
-import { batchImport, deleteWord, exportCsvUrl, listTags, listWords } from '../api'
+import WordQuickView from '../components/WordQuickView.vue'
+import { batchImport, deleteWord, exportCsvUrl, listTags, listWords, updateWord } from '../api'
 import { cardType, parseTags, relativeTime, toast } from '../utils'
 
 const route = useRoute()
@@ -141,6 +204,13 @@ const sort = ref('time_desc')
 const loading = ref(false)
 const loadingMore = ref(false)
 const pendingDelete = ref(null)
+const activeId = ref(null) // 悬浮详情窗当前词条 id
+const selectMode = ref(false)  // 多选模式
+const selected = ref([])       // 已选词条 id 列表
+const batchConfirm = ref(false) // 批量删除确认弹窗
+const tagEditor = ref(false)    // 批量加标签弹窗
+const tagInput = ref('')
+const batchBusy = ref(false)    // 批量操作进行中（防重入）
 const fileInput = ref(null)
 
 const PAGE_SIZE = 60            // 每页条数（后端上限 500）
@@ -212,6 +282,79 @@ watch(
   },
 )
 
+// 悬浮窗里点删除：关掉悬浮窗，走列表统一的确认弹窗
+function onQuickDelete(word) {
+  activeId.value = null
+  pendingDelete.value = word
+}
+
+/* ========= 多选与批量操作 ========= */
+function toggleMode() {
+  selectMode.value = !selectMode.value
+  selected.value = []
+  batchConfirm.value = false
+  tagEditor.value = false
+  tagInput.value = ''
+}
+
+function onCardClick(w) {
+  if (!selectMode.value) {
+    activeId.value = w.id
+    return
+  }
+  const i = selected.value.indexOf(w.id)
+  if (i > -1) selected.value.splice(i, 1)
+  else selected.value.push(w.id)
+}
+
+function selectAll() {
+  selected.value = selected.value.length === words.value.length
+    ? []
+    : words.value.map((w) => w.id)
+}
+
+// 后端无批量接口：循环单条请求，allSettled 统计成败，单条失败不拖垮整批
+async function batchDelete() {
+  batchConfirm.value = false
+  batchBusy.value = true
+  const ids = [...selected.value]
+  const results = await Promise.allSettled(ids.map((id) => deleteWord(id)))
+  const ok = results.filter((r) => r.status === 'fulfilled').length
+  batchBusy.value = false
+  toast(
+    ok === ids.length ? `已删除 ${ok} 条` : `删除完成：成功 ${ok} 条，失败 ${ids.length - ok} 条`,
+    ok === ids.length ? 'success' : 'error',
+  )
+  selectMode.value = false
+  selected.value = []
+  await Promise.all([loadWords(), loadTags()])
+}
+
+// 追加式加标签：与原有标签合并去重，部分更新只传 tags 字段
+async function batchAddTags() {
+  const newTags = tagInput.value.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean)
+  if (!newTags.length) return
+  tagEditor.value = false
+  batchBusy.value = true
+  const targets = words.value.filter((w) => selected.value.includes(w.id))
+  const results = await Promise.allSettled(
+    targets.map((w) => {
+      const merged = [...new Set([...parseTags(w.tags), ...newTags])]
+      return updateWord(w.id, { tags: merged.join(',') })
+    }),
+  )
+  const ok = results.filter((r) => r.status === 'fulfilled').length
+  batchBusy.value = false
+  tagInput.value = ''
+  toast(
+    ok === targets.length ? `已为 ${ok} 条添加标签` : `添加完成：成功 ${ok} 条，失败 ${targets.length - ok} 条`,
+    ok === targets.length ? 'success' : 'error',
+  )
+  selectMode.value = false
+  selected.value = []
+  await Promise.all([loadWords(), loadTags()])
+}
+
 async function confirmDelete() {
   const target = pendingDelete.value
   pendingDelete.value = null
@@ -251,3 +394,83 @@ onMounted(() => {
   loadTags()
 })
 </script>
+
+<style scoped>
+/* ========= 多选模式 ========= */
+.mode-on {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: #eef3ea;
+}
+.card.selectable { position: relative; cursor: default; }
+.card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(52, 103, 79, .15);
+}
+.check {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: #fff;
+  color: transparent;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  transition: all .15s;
+}
+.check.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* ========= 底部批量操作栏 ========= */
+.batch-bar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 12px 18px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(51, 74, 38, .12);
+}
+.bb-count { font-size: 12px; color: var(--muted); }
+.bb-count b { color: var(--primary); font-size: 14px; }
+.bb-link {
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: var(--primary-2);
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.bb-link:hover { text-decoration: underline; }
+.bb-spacer { flex: 1; }
+
+.batch-tag-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #fbfcf9;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 12px 0 18px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.batch-tag-input:focus {
+  outline: none;
+  border-color: var(--primary-2);
+  box-shadow: 0 0 0 3px rgba(52, 103, 79, .12);
+}
+</style>

@@ -14,7 +14,7 @@
           <span v-if="word.cn_term" class="card-cn">{{ word.cn_term }}</span>
           <WordBadge :type="wordType" />
         </span>
-        <Phonetics :uk="word.phonetic_uk" :us="word.phonetic_us" />
+        <Phonetics :uk="word.phonetic_uk" :us="word.phonetic_us" :word="word.abbreviation" />
       </div>
 
       <div v-if="word.full_name" class="detail-block">

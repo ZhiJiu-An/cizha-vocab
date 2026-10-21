@@ -80,6 +80,7 @@
               class="ff-phos"
               :uk="currentWord.phonetic_uk"
               :us="currentWord.phonetic_us"
+              :word="currentWord.abbreviation"
               uk-label="英"
               us-label="美"
               always-show

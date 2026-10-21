@@ -1,10 +1,10 @@
 <template>
   <div class="app">
     <aside class="sidebar">
-      <div class="logo">
-        <span class="icon">🌿</span>
-        <b>DanCiJi<span>拾词</span></b>
-      </div>
+      <router-link to="/" class="logo">
+        <span class="icon">✳</span>
+        <b>拾词<span>Lexi</span></b>
+      </router-link>
       <div class="workspace">PERSONAL WORKSPACE</div>
       <nav>
         <router-link
@@ -19,14 +19,20 @@
         </router-link>
       </nav>
       <div class="side-bottom">
-        <div class="plant">🪴</div>
-        <strong>让每个单词，慢慢生根。</strong>
-        <p>Stay curious. Keep growing.</p>
+        <div class="plant">✳</div>
+        <strong>每天一点，词汇成林。</strong>
+        <p>给好奇心留一点生长的空间。</p>
+        <div class="profile"><span class="avatar">{{ avatar }}</span><div><b>{{ name }}</b><small>终身学习者</small></div></div>
       </div>
     </aside>
 
     <main class="main">
-      <router-view />
+      <header class="app-header">
+        <div><span>我的学习空间</span><i>/</i><b>{{ currentTitle }}</b></div>
+        <div class="header-meta"><span>♧ 今日待复习 <b>{{ dueCount }}</b></span><span class="header-divider"></span><span>{{ today }}</span><span class="avatar small">{{ avatar }}</span></div>
+      </header>
+      <div class="page-content"><router-view /></div>
+      <footer class="app-footer"><span>一点一滴，皆有回响。</span><span>MADE FOR YOUR CURIOUS MIND <b>✳</b></span></footer>
     </main>
 
     <!-- 全局提示 -->
@@ -39,21 +45,25 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { toastState } from './utils'
+import { toastState, toast } from './utils'
+import { prefs, displayName, avatarText } from './utils/prefs'
 import { getReviewOverview } from './api'
 
 const route = useRoute()
 const dueCount = ref(0)
+const name = computed(displayName)
+const avatar = computed(avatarText)
+const currentTitle = computed(() => ({ '/': '词典', '/words': '词库', '/review': '复习', '/stats': '统计', '/tags': '标签', '/settings': '设置', '/new': '新建词条' }[route.path] || (route.path.includes('/edit') || route.path.match(/^\/words\/\d+$/) ? '词条详情' : '词典')))
+const today = new Intl.DateTimeFormat('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
 
 const navItems = [
-  { path: '/', icon: '🔍', title: '词典' },
-  { path: '/words', icon: '📚', title: '词库' },
-  { path: '/review', icon: '🧠', title: '复习' },
-  { path: '/stats', icon: '📊', title: '统计' },
-  { path: '/tags', icon: '🏷️', title: '标签' },
-  { path: '/settings', icon: '⚙️', title: '设置' },
+  { path: '/', icon: '⌕', title: '词典' },
+  { path: '/words', icon: '▤', title: '词库' },
+  { path: '/review', icon: '◷', title: '复习' },
+  { path: '/stats', icon: '▥', title: '统计' },
+  { path: '/settings', icon: '⚙', title: '设置' },
 ]
 
 // 「首页」需精确匹配；其余前缀匹配，使详情/编辑页仍高亮「词库」
@@ -72,6 +82,35 @@ async function refreshDue() {
   }
 }
 
-onMounted(refreshDue)
+// 学习提醒：页面保持打开时，到点后 1 小时内提醒一次，每天最多一次
+const REMIND_KEY = 'danciji_reminded_on'
+
+function checkReminder() {
+  const { enabled, time } = prefs.reminder
+  if (!enabled) return
+  const [h, m] = time.split(':').map(Number)
+  const now = new Date()
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  const target = h * 60 + m
+  if (nowMin < target || nowMin - target > 60) return
+  const dayKey = `${now.toDateString()} ${time}`
+  if (localStorage.getItem(REMIND_KEY) === dayKey) return
+  localStorage.setItem(REMIND_KEY, dayKey)
+  toast(
+    dueCount.value > 0
+      ? `今天还有 ${dueCount.value} 个词等着复习 🌱`
+      : '今天还没有新词，去词典逛逛吧 🌱',
+    'info',
+  )
+}
+
+let reminderTimer
+
+onMounted(() => {
+  refreshDue()
+  checkReminder()
+  reminderTimer = setInterval(checkReminder, 60_000)
+})
+onUnmounted(() => clearInterval(reminderTimer))
 watch(() => route.path, refreshDue)
 </script>
