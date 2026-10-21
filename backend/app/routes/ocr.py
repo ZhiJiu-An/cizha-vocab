@@ -28,6 +28,26 @@ TIMEOUT = 60              # 秒，视觉模型响应较慢，放宽超时
 MAX_SIZE = 10 * 1024 * 1024   # 10MB 上限
 MAX_WORDS = 15
 ALLOWED_MIME = ("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp")
+READ_CHUNK = 1024 * 1024    # 分块读取大小（1MB）
+
+
+async def _read_limited(file: UploadFile, max_size: int) -> bytes:
+    """分块读取上传内容，超过上限立即抛 400 并停止读取
+
+    v0.13：旧版先 `await file.read()` 整块读入再判断大小，超大文件会先
+    完整占用内存才被拒绝。分块读取把「越过上限」作为中断点，内存峰值
+    约为 max_size + 一个分块。
+    """
+    data = bytearray()
+    while True:
+        chunk = await file.read(READ_CHUNK)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > max_size:
+            raise HTTPException(status_code=400, detail="图片过大，请压缩到 10MB 以内")
+    return bytes(data)
+
 
 # 提取提示词：返回原文、译文、术语列表，便于前端展示
 PROMPT = """你是一个严格的文字提取器。请识别这张图片中的英文文字，并完成两件事：
@@ -94,11 +114,9 @@ async def extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if mime not in ALLOWED_MIME:
         raise HTTPException(status_code=400, detail="仅支持图片文件（png / jpg / webp / gif / bmp）")
 
-    data = await file.read()
+    data = await _read_limited(file, MAX_SIZE)
     if not data:
         raise HTTPException(status_code=400, detail="图片内容为空")
-    if len(data) > MAX_SIZE:
-        raise HTTPException(status_code=400, detail="图片过大，请压缩到 10MB 以内")
 
     config = get_vision_config()
     if not config:

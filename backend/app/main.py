@@ -59,13 +59,26 @@ def _migrate():
 
 _migrate()
 
-app = FastAPI(title="DanCiJi 术语记录本", version="0.12.0")
+app = FastAPI(title="DanCiJi 术语记录本", version="0.13.0")
 
 # 跨域（Vue 前端在另一端口）
+# v0.13：不再全开放。默认只允许本地开发/预览端口，可用 DANCIJI_ALLOWED_ORIGINS
+# （逗号分隔）覆盖，部署到其他域名时无需改代码。
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "DANCIJI_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:4173,http://127.0.0.1:4173",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -83,7 +96,7 @@ app.include_router(llm_config.router)
 def root():
     return {
         "name": "DanCiJi",
-        "version": "0.12.0",
+        "version": "0.13.0",
         "docs": "/docs",
         "message": "面向技术从业者的术语 / 单词记录本",
     }

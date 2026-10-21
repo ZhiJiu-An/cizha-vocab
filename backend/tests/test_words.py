@@ -1,5 +1,6 @@
 """词条接口测试 —— 覆盖 P0-1 / P0-2 / P0-3 / P0-5 / P0-6 / P0-7 / P1-4"""
 
+from app.models import ReviewLog
 from tests.helpers import ApiTestCase
 
 
@@ -516,7 +517,7 @@ class TestBulkOperations(ApiTestCase):
 
 
 class TestRestoreDeleted(ApiTestCase):
-    """C2：删除可撤销，且撤销后学习进度不丢"""
+    """C2：删除可撤销，撤销后排期不丢（历史打卡不回填）"""
 
     def test_restore_preserves_review_progress(self):
         from datetime import datetime, timedelta
@@ -546,7 +547,9 @@ class TestRestoreDeleted(ApiTestCase):
         self.assertEqual(restored["note"], "备注")
         self.assertEqual(restored["examples"], [{"en": "x", "zh": "y"}])
         self.assertEqual(restored["review_stage"], 3)
-        self.assertEqual(restored["review_count"], 7)
+        # v0.13：日志已随删除清空，累计次数归零，避免与统计口径矛盾
+        self.assertEqual(restored["review_count"], 0)
+        self.assertEqual(self.review_logs(restored["id"]), [])
         self.assertEqual(restored["in_review"], 0)
         self.assertEqual(restored["next_review_at"][:10], target.strftime("%Y-%m-%d"))
 
@@ -579,3 +582,74 @@ class TestRestoreDeleted(ApiTestCase):
 
     def test_restore_rejects_empty(self):
         self.assertEqual(self.client.post("/api/words/restore", json={"items": []}).status_code, 422)
+
+
+class TestDeleteCleansReviewLogs(ApiTestCase):
+    """v0.13：删除词条必须同事务清理 ReviewLog，统计与错词榜不得残留"""
+
+    def add_logs(self, word_id, count=2, result="remember"):
+        db = self.SessionLocal()
+        try:
+            for _ in range(count):
+                db.add(ReviewLog(word_id=word_id, result=result))
+            db.commit()
+        finally:
+            db.close()
+
+    def total_reviews(self):
+        return self.client.get("/api/stats/summary").json()["totals"]["total_reviews"]
+
+    def test_single_delete_removes_logs_and_keeps_stats_consistent(self):
+        word = self.create_word("rag")
+        self.add_logs(word["id"], 2, result="forget")
+        self.assertEqual(self.total_reviews(), 2)
+        self.assertEqual(
+            self.client.get("/api/review/overview").json()["reviewed_today"], 1
+        )
+
+        self.assertEqual(self.client.delete(f"/api/words/{word['id']}").status_code, 200)
+
+        self.assertEqual(self.review_logs(word["id"]), [])
+        self.assertEqual(self.total_reviews(), 0)
+        self.assertEqual(self.client.get("/api/review/overview").json()["reviewed_today"], 0)
+        self.assertEqual(self.client.get("/api/review/mistakes").json()["items"], [])
+
+    def test_bulk_delete_removes_logs_for_found_words(self):
+        a = self.create_word("a")
+        b = self.create_word("b")
+        self.add_logs(a["id"], 2)
+        self.add_logs(b["id"], 1)
+
+        body = self.client.post(
+            "/api/words/bulk-delete", json={"ids": [a["id"], b["id"], 999]}
+        ).json()
+        self.assertEqual(body["succeeded"], 2)
+        self.assertEqual(body["failed"], 1)
+        self.assertEqual(self.review_logs(a["id"]), [])
+        self.assertEqual(self.review_logs(b["id"]), [])
+        self.assertEqual(self.total_reviews(), 0)
+
+    def test_restore_does_not_bring_back_logs(self):
+        word = self.create_word("rag")
+        self.add_logs(word["id"], 3, result="forget")
+        snapshot = self.client.get(f"/api/words/{word['id']}").json()
+        self.client.delete(f"/api/words/{word['id']}")
+
+        restored = self.client.post(
+            "/api/words/restore", json={"items": [snapshot]}
+        ).json()["words"][0]
+        self.assertEqual(restored["review_count"], 0)
+        self.assertEqual(self.review_logs(restored["id"]), [])
+        self.assertEqual(self.total_reviews(), 0)
+        self.assertEqual(self.client.get("/api/review/mistakes").json()["items"], [])
+
+    def test_new_word_after_delete_does_not_inherit_logs(self):
+        """SQLite 会复用最大 rowid，新词条不得继承被删词条的日志"""
+        word = self.create_word("rag")
+        self.add_logs(word["id"], 2, result="forget")
+        self.client.delete(f"/api/words/{word['id']}")
+
+        fresh = self.create_word("rag2")
+        self.assertEqual(fresh["review_count"], 0)
+        self.assertEqual(self.review_logs(fresh["id"]), [])
+        self.assertEqual(self.total_reviews(), 0)

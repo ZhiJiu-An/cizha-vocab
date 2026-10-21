@@ -111,12 +111,16 @@ async function runToastAction(item) {
 }
 
 // 路由切换时刷新复习到期数徽章
+// 返回是否刷新成功：首次提醒要等真实到期数拿到后再判断，否则会拿着初始 0
+// 写入「今天已提醒」的键，导致当天真正的提醒被吞掉（v0.13）。
 async function refreshDue() {
   try {
     const ov = await getReviewOverview()
     dueCount.value = ov.due_today
+    return true
   } catch {
     dueCount.value = 0
+    return false
   }
 }
 
@@ -144,9 +148,9 @@ function checkReminder() {
 
 let reminderTimer
 
-onMounted(() => {
-  refreshDue()
-  checkReminder()
+onMounted(async () => {
+  // 先拿到真实到期数再判断是否提醒；拉取失败则跳过本次，也不写提醒键
+  if (await refreshDue()) checkReminder()
   reminderTimer = setInterval(checkReminder, 60_000)
 })
 onUnmounted(() => clearInterval(reminderTimer))

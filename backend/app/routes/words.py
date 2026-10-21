@@ -13,7 +13,7 @@ from ..common import (
     STAGES_DAYS, normalize_tags, sorted_tag_items, tag_match_expr, today_start,
 )
 from ..database import get_db
-from ..models import Word
+from ..models import ReviewLog, Word
 from ..schemas import (
     BulkIdsIn, BulkRestoreIn, BulkResult, BulkTagIn, RestoreResult, TagItem,
     WordCreate, WordListResponse, WordLookupResult, WordResponse, WordUpdate,
@@ -218,10 +218,17 @@ def _split_ids(raw_ids: list[int]) -> tuple[list[int], set[int]]:
 
 @router.post("/bulk-delete", response_model=BulkResult)
 def bulk_delete(payload: BulkIdsIn, db: Session = Depends(get_db)):
-    """按 id 批量删除，单事务提交"""
-    ids, wanted = _split_ids(payload.ids)
+    """按 id 批量删除（词条 + 复习日志），单事务提交"""
+    ids, _ = _split_ids(payload.ids)
     words = db.query(Word).filter(Word.id.in_(ids)).all()
     found = {w.id for w in words}
+
+    # v0.13：删除是彻底移除，日志必须同步清理，否则统计仍会算上已删词条，
+    # 且 SQLite 复用 rowid 时新词条可能继承旧日志。
+    if found:
+        db.query(ReviewLog).filter(ReviewLog.word_id.in_(found)).delete(
+            synchronize_session=False
+        )
     for word in words:
         db.delete(word)
     db.commit()
@@ -242,7 +249,7 @@ def bulk_add_tag(payload: BulkTagIn, db: Session = Depends(get_db)):
     if not new_tags:
         raise HTTPException(status_code=400, detail="标签不能为空")
 
-    ids, wanted = _split_ids(payload.ids)
+    ids, _ = _split_ids(payload.ids)
     words = db.query(Word).filter(Word.id.in_(ids)).all()
     found = {w.id for w in words}
     for word in words:
@@ -262,11 +269,14 @@ def bulk_add_tag(payload: BulkTagIn, db: Session = Depends(get_db)):
 # ========== 撤销删除（v0.11） ==========
 @router.post("/restore", response_model=RestoreResult)
 def restore_words(payload: BulkRestoreIn, db: Session = Depends(get_db)):
-    """把刚删除的词条原样回灌（含复习进度与创建时间）
+    """把刚删除的词条回灌（保留当前复习排期与创建时间）
 
     删除是不可逆的，但「误删」很常见。前端在删除时缓存完整词条 JSON，
-    这里按原样插回：复习档位、下次复习日期、累计次数、创建时间都保留，
-    因此撤销不会把学习进度打回原点；同名词条已存在时跳过，不覆盖。
+    这里按原样插回复习档位、下次复习日期与创建时间，撤销不会把排期打回原点。
+    同名词条已存在时跳过，不覆盖。
+
+    v0.13 起删除会一并清掉 ReviewLog，因此撤销不再保留累计次数（置 0），
+    避免详情页「累计 N 次」与统计页 / 错词榜口径互相矛盾。
     """
     restored = []
     skipped = 0
@@ -290,7 +300,7 @@ def restore_words(payload: BulkRestoreIn, db: Session = Depends(get_db)):
         data["review_stage"] = max(
             0, min(int(data.get("review_stage") or 0), len(STAGES_DAYS) - 1)
         )
-        data["review_count"] = max(0, int(data.get("review_count") or 0))
+        data["review_count"] = 0          # 日志已随删除清空，累计次数同步归零
         data["in_review"] = 1 if data.get("in_review") is None else (1 if data["in_review"] else 0)
         if data.get("next_review_at") is None:
             data["next_review_at"] = today_start()
@@ -472,9 +482,13 @@ def update_word(word_id: int, word_data: WordUpdate, db: Session = Depends(get_d
 # ========== 删 ==========
 @router.delete("/{word_id}")
 def delete_word(word_id: int, db: Session = Depends(get_db)):
+    """彻底删除词条及其复习日志（同一事务）"""
     word = db.query(Word).filter(Word.id == word_id).first()
     if not word:
         raise HTTPException(status_code=404, detail="词条不存在")
+    db.query(ReviewLog).filter(ReviewLog.word_id == word_id).delete(
+        synchronize_session=False
+    )
     db.delete(word)
     db.commit()
     return {"message": "删除成功"}
