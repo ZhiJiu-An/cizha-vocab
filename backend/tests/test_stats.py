@@ -156,7 +156,6 @@ class TestTrendRange(ApiTestCase):
                 )
 
     def test_last_bucket_includes_today(self):
-        from datetime import datetime
         word = self.create_word("today")
         self.client.post(f"/api/review/{word['id']}/answer", json={"result": "remember"})
         for days in (7, 30, 90):
@@ -183,7 +182,8 @@ class TestTrendRange(ApiTestCase):
         finally:
             db.close()
 
-        total = lambda d: sum(x["reviews"] for x in self.summary(days=d)["daily_trend"])
+        def total(d):
+            return sum(x["reviews"] for x in self.summary(days=d)["daily_trend"])
         self.assertEqual(total(7), 2)
         self.assertEqual(total(30), 2)
         self.assertEqual(total(90), 7)      # 40 天前那 5 次落在 90 天窗口内

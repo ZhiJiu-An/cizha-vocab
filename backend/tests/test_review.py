@@ -287,7 +287,7 @@ class TestDueOrdering(ApiTestCase):
         self.assertEqual(names, ["b-new", "a-old"])
 
     def test_mistakes_order_still_only_returns_due_words(self):
-        a = self.create_word("due-now")
+        self.create_word("due-now")
         b = self.create_word("not-due")
         self.set_word(b["id"], next_review_at=today_start() + timedelta(days=10))
         self.add_forgets(b["id"], 99)
@@ -303,7 +303,7 @@ class TestDueOrdering(ApiTestCase):
         self.assertEqual(len(resp.json()["items"]), 1)
 
     def test_order_combines_with_tag_filter(self):
-        a = self.create_word("a", tags="LLM")
+        self.create_word("a", tags="LLM")
         b = self.create_word("b", tags="LLM")
         self.create_word("c", tags="other")
         self.add_forgets(b["id"], 2)

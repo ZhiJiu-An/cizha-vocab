@@ -75,10 +75,20 @@
               <div class="rv-line">
                 <span class="rv-k">下次复习</span>{{ nextReviewLabel(word.next_review_at) }}
               </div>
-              <div class="rv-line">
+              <div class="rv-line rv-line-queue">
                 <span class="rv-k">累计复习</span>{{ word.review_count }} 次
-                <span v-if="!word.in_review" class="queue-off">· 已移出复习队列</span>
+                <span :class="word.in_review ? 'queue-on' : 'queue-off'">
+                  · {{ word.in_review ? '在复习队列中' : '已移出复习队列' }}
+                </span>
               </div>
+              <button
+                class="btn btn-outline btn-sm"
+                :disabled="queueBusy"
+                style="margin-top: 6px"
+                @click="toggleQueue"
+              >
+                {{ queueBusy ? '处理中…' : (word.in_review ? '⏸ 移出队列' : '▶ 加入队列') }}
+              </button>
             </div>
           </div>
 
@@ -110,7 +120,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Phonetics from './Phonetics.vue'
 import WordBadge from './WordBadge.vue'
-import { getWord } from '../api'
+import { getWord, updateWord } from '../api'
 import { cardType, nextReviewLabel, parseTags, relativeTime, stageDays, toast } from '../utils'
 
 const props = defineProps({
@@ -121,6 +131,7 @@ const emit = defineEmits(['close', 'delete'])
 const router = useRouter()
 const word = ref(null)
 const loading = ref(true)
+const queueBusy = ref(false)
 
 // 例句兼容：v0.4 为 {en, zh} 对象，旧数据可能仍是纯字符串
 const examples = computed(() => (word.value?.examples || []).map(exampleText))
@@ -129,6 +140,21 @@ const wordType = computed(() => cardType(word.value || {}))
 function exampleText(ex) {
   if (ex && typeof ex === 'object') return { en: ex.en || '', zh: ex.zh || '' }
   return { en: String(ex ?? ''), zh: '' }
+}
+
+// 移出 / 加入复习队列（v0.11）：与详情页保持一致
+async function toggleQueue() {
+  if (!word.value || queueBusy.value) return
+  const next = word.value.in_review ? 0 : 1
+  queueBusy.value = true
+  try {
+    word.value = await updateWord(word.value.id, { in_review: next })
+    toast(next ? '已加入复习队列' : '已移出复习队列', 'success')
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    queueBusy.value = false
+  }
 }
 
 onMounted(async () => {
