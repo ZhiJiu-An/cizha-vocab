@@ -32,3 +32,10 @@ dist-ssr/
 
 # 日志
 *.log
+
+# 内部开发笔记（不公开）
+MVP.md
+PROJECT_AUDIT.md
+repair.md
+suggestion.md
+docs/versions/

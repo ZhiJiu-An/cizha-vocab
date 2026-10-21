@@ -6,7 +6,7 @@
 
 面向 AI / 大模型从业者的英文术语记录本
 
-[![Version](https://img.shields.io/badge/version-v0.14-34674f?style=flat-square)](MVP.md)
+[![Version](https://img.shields.io/badge/version-v0.14-34674f?style=flat-square)](#)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.5-42B883?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
@@ -314,11 +314,9 @@ cizha-vocab/
 │       ├── components/        # Phonetics / WordBadge / WordQuickView
 │       ├── api/               # 接口封装
 │       └── utils/             # toast / 偏好 / 发音
-├── docs/versions/             # 历史版本文档
 ├── assets/screenshots/        # README 界面截图
 ├── setup.sh / setup.bat       # 一键安装依赖
 ├── start.sh / start.bat       # 一键启动（单端口 8000）
-├── MVP.md                     # 功能规格与验收标准
 └── README.md
 ```
 
