@@ -24,7 +24,11 @@
       </button>
       <template v-if="!selectMode">
         <button class="btn btn-outline" @click="triggerImport">📥 导入 CSV</button>
-        <button class="btn btn-outline" @click="doExport">📤 导出 CSV</button>
+        <button
+          class="btn btn-outline"
+          title="仅导出词条与当前复习进度，不含逐次复习历史"
+          @click="doExport"
+        >📤 导出 CSV</button>
       </template>
       <input ref="fileInput" type="file" accept=".csv" style="display: none" @change="onImport" />
     </div>
