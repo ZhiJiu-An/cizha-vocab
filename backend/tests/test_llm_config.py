@@ -1,26 +1,50 @@
-"""大模型配置测试（v0.9：text / vision 双区块，各自独立）
+"""模型配置测试（v0.12：模型列表 + 默认角色 + 提示词预设）
 
-关注三点：
-1. 两个区块互不干扰（存一个不影响另一个，删一个不牵连另一个）
-2. 视觉模型的地址 / Key 允许留空并正确回落到文本模型
-3. 脱敏 Key 回传时能被还原，不会把 * 写进配置
+关注：
+1. 旧版 {"text", "vision"} 结构自动迁移成模型列表
+2. .env 只在配置文件不存在时用于初始化，之后不再参与
+3. 每种类型只有一个默认模型，切换 / 删除后自动补位
+4. 文本模型提示词必须保留五段标记与 {word} 占位符
+5. 视觉模型的地址 / Key 留空时回落到默认文本模型
+6. 脱敏 Key 回传时能被还原，不会把 * 写进配置
 
 所有用例把 llm_config.json 指向临时目录，绝不写真实的 backend/data/。
 """
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from tests.helpers import ApiTestCase
 from app import config
 from app.routes import llm_config as route_mod
+from tests.helpers import ApiTestCase
 
 ENV_KEYS = (
     "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
     "LLM_VISION_BASE_URL", "LLM_VISION_API_KEY", "LLM_VISION_MODEL",
 )
+
+TEXT_PAYLOAD = {
+    "name": "DeepSeek 翻译",
+    "type": "text",
+    "base_url": "https://text.example/v1",
+    "api_key": "sk-text-12345678",
+    "model": "deepseek-chat",
+    "prompt_preset": "llm",
+    "prompt": "",
+}
+
+VISION_PAYLOAD = {
+    "name": "千问视觉",
+    "type": "vision",
+    "base_url": "",
+    "api_key": "",
+    "model": "qwen3-vl-plus",
+    "prompt_preset": "custom",
+    "prompt": "",
+}
 
 
 class ConfigTestCase(ApiTestCase):
@@ -38,7 +62,6 @@ class ConfigTestCase(ApiTestCase):
         path_patcher.start()
         self.addCleanup(path_patcher.stop)
 
-        # 清掉 .env 带来的变量，避免真实配置影响断言
         env_patcher = patch.dict(os.environ, {key: "" for key in ENV_KEYS})
         env_patcher.start()
         self.addCleanup(env_patcher.stop)
@@ -51,237 +74,253 @@ class ConfigTestCase(ApiTestCase):
 
     # ---- 辅助 ----
 
-    def save_runtime(self, kind, base_url="", api_key="", model=""):
-        config.save_runtime_config(kind, base_url, api_key, model)
-
     def set_env(self, **values):
         for key, value in values.items():
             os.environ[key] = value
 
     def configure_text_env(self):
-        """给一份完整的文本模型环境变量，供视觉模型回落"""
         self.set_env(LLM_BASE_URL="https://text.example/v1",
                      LLM_API_KEY="sk-text-12345678", LLM_MODEL="deepseek-chat")
 
-    def get_config(self, kind="text"):
-        return self.client.get("/api/llm/config", params={"kind": kind}).json()
+    def write_legacy(self, data: dict):
+        config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        config.CONFIG_FILE.write_text(json.dumps(data), encoding="utf-8")
 
-    def put_config(self, kind, **payload):
-        return self.client.put("/api/llm/config", json=payload, params={"kind": kind}).json()
+    def get_models(self):
+        resp = self.client.get("/api/llm/models")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
 
+    def create(self, **overrides):
+        payload = {**TEXT_PAYLOAD, **overrides}
+        return self.client.post("/api/llm/models", json=payload).json()
 
-class TestGetConfig(ConfigTestCase):
-    def test_text_falls_back_to_env(self):
-        self.set_env(LLM_BASE_URL="https://env.example/v1", LLM_API_KEY="sk-env-12345678",
-                     LLM_MODEL="deepseek-chat")
-        body = self.get_config("text")
-        self.assertEqual(body["source"], "env")
-        self.assertFalse(body["has_runtime"])
-        self.assertEqual(body["model"], "deepseek-chat")
-        self.assertIn("*", body["api_key"])            # 明文不外泄
-        self.assertNotIn("sk-env-12345678", body["api_key"])
-
-    def test_nothing_configured(self):
-        body = self.get_config("text")
-        self.assertEqual(body["source"], "none")
-        self.assertEqual(body["model"], "")
-
-    def test_runtime_wins_over_env(self):
-        self.set_env(LLM_BASE_URL="https://env.example/v1", LLM_API_KEY="sk-env-12345678",
-                     LLM_MODEL="env-model")
-        self.save_runtime("text", "https://runtime.example/v1", "sk-run-12345678", "run-model")
-        body = self.get_config("text")
-        self.assertEqual(body["source"], "runtime")
-        self.assertTrue(body["has_runtime"])
-        self.assertEqual(body["model"], "run-model")
-
-    def test_vision_reports_none_without_model(self):
-        self.assertEqual(self.get_config("vision")["source"], "none")
-
-    def test_vision_source_is_env(self):
-        self.set_env(LLM_VISION_MODEL="qwen3-vl-plus")
-        body = self.get_config("vision")
-        self.assertEqual(body["source"], "env")
-        self.assertEqual(body["model"], "qwen3-vl-plus")
-
-    def test_illegal_kind_falls_back_to_text(self):
-        """脏参数不能 500，按文本模型处理"""
-        self.set_env(LLM_MODEL="deepseek-chat", LLM_API_KEY="sk-env-12345678")
-        self.assertEqual(self.get_config("banana")["model"], "deepseek-chat")
-
-
-class TestSaveConfig(ConfigTestCase):
-    def test_text_save_success(self):
-        body = self.put_config("text", base_url="https://api.deepseek.com/v1",
-                               api_key="sk-real-12345678", model="deepseek-chat")
+    def create_ok(self, **overrides):
+        body = self.create(**overrides)
         self.assertTrue(body["ok"], body)
-        self.assertEqual(config.load_runtime_config("text")["model"], "deepseek-chat")
-        self.assertEqual(self.get_config("text")["source"], "runtime")
+        return body["model"]
+
+    def update(self, model_id, **overrides):
+        payload = {**TEXT_PAYLOAD, **overrides}
+        return self.client.put(f"/api/llm/models/{model_id}", json=payload).json()
+
+
+class TestBootstrap(ConfigTestCase):
+    def test_empty_when_nothing_configured(self):
+        self.assertEqual(self.get_models()["models"], [])
+
+    def test_env_bootstraps_default_cards_once(self):
+        self.configure_text_env()
+        self.set_env(LLM_VISION_MODEL="qwen3-vl-plus")
+
+        body = self.get_models()
+        models = body["models"]
+        self.assertEqual(len(models), 2)
+        roles = {m["type"]: m["role"] for m in models}
+        self.assertEqual(roles, {"text": "default_text", "vision": "default_vision"})
+        self.assertTrue(config.CONFIG_FILE.exists())
+        self.assertIn("【定名】", next(m for m in models if m["type"] == "text")["prompt"])
+
+        # 首次初始化后 .env 不再参与
+        self.set_env(LLM_MODEL="env-model")
+        self.assertEqual(len(self.get_models()["models"]), 2)
+        self.assertEqual(config.get_llm_config()[2], "deepseek-chat")
+
+    def test_legacy_structure_migrates(self):
+        self.write_legacy({
+            "text": {"base_url": "https://text.example/v1",
+                     "api_key": "sk-text-12345678", "model": "deepseek-chat"},
+            "vision": {"base_url": "", "api_key": "", "model": "qwen3-vl-plus"},
+        })
+
+        models = self.get_models()["models"]
+        self.assertEqual(len(models), 2)
+        self.assertEqual({m["type"] for m in models}, {"text", "vision"})
+
+        text = next(m for m in models if m["type"] == "text")
+        self.assertEqual(text["role"], "default_text")
+        self.assertIn("【译文】", text["prompt"])
+        self.assertEqual(config.get_llm_config(),
+                         ("https://text.example/v1", "sk-text-12345678", "deepseek-chat"))
+
+        saved = json.loads(config.CONFIG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(saved["version"], 2)
+        self.assertEqual(len(saved["models"]), 2)
+
+        # 再次读取不会重复迁移
+        self.assertEqual(len(self.get_models()["models"]), 2)
+
+    def test_legacy_partial_section_skipped(self):
+        self.write_legacy({"text": {"model": "", "base_url": "https://x/v1"}})
+        self.assertEqual(self.get_models()["models"], [])
+
+
+class TestCrud(ConfigTestCase):
+    def test_create_text_model_becomes_default(self):
+        card = self.create_ok()
+        self.assertEqual(card["role"], "default_text")
+        self.assertEqual(config.get_llm_config(), ("https://text.example/v1",
+                                                   "sk-text-12345678", "deepseek-chat"))
+        self.assertEqual(config.CONFIG_FILE.stat().st_size > 0, True)
+
+    def test_create_returns_masked_key(self):
+        card = self.create_ok()
+        self.assertIn("*", card["api_key"])
+        self.assertNotIn("sk-text-12345678", card["api_key"])
 
     def test_failed_probe_is_not_saved(self):
         self.probe.return_value = route_mod.TestResult(ok=False, message="服务返回 404")
-        body = self.put_config("text", base_url="https://x/v1", api_key="sk-real-12345678",
-                               model="nope")
+        body = self.create()
         self.assertFalse(body["ok"])
-        self.assertIsNone(config.load_runtime_config("text"))
+        self.assertEqual(self.get_models()["models"], [])
 
-    def test_masked_key_is_restored_not_saved_literally(self):
-        """表单回显的是脱敏值，保存时不能把 **** 写进配置"""
-        self.save_runtime("text", "https://x/v1", "sk-real-12345678", "m1")
-        body = self.put_config("text", base_url="https://y/v1",
-                               api_key="sk-r**********5678", model="m2")
+    def test_update_restores_masked_key(self):
+        card = self.create_ok()
+        masked = self.get_models()["models"][0]["api_key"]
+
+        body = self.update(card["id"], name="DeepSeek 新", api_key=masked)
         self.assertTrue(body["ok"], body)
-        saved = config.load_runtime_config("text")
-        self.assertEqual(saved["api_key"], "sk-real-12345678")
+        saved = config.get_model(card["id"])
+        self.assertEqual(saved["api_key"], "sk-text-12345678")
+        self.assertEqual(saved["name"], "DeepSeek 新")
         self.assertNotIn("*", saved["api_key"])
-        self.assertEqual(saved["base_url"], "https://y/v1")
 
-    def test_empty_model_rejected(self):
-        body = self.put_config("text", base_url="https://x/v1", api_key="sk-a", model="  ")
+    def test_update_missing_model(self):
+        resp = self.client.put("/api/llm/models/nope", json=TEXT_PAYLOAD)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_promotes_next_model(self):
+        first = self.create_ok()
+        second = self.create_ok(name="备用模型", model="deepseek-reasoner")
+        self.assertEqual(config.get_model(first["id"])["role"], "default_text")
+
+        resp = self.client.delete(f"/api/llm/models/{first['id']}")
+        self.assertEqual(resp.status_code, 200)
+        remaining = config.get_model(second["id"])
+        self.assertEqual(remaining["role"], "default_text")
+        self.assertEqual(config.get_llm_config()[2], "deepseek-reasoner")
+
+    def test_delete_missing_model(self):
+        self.assertEqual(self.client.delete("/api/llm/models/nope").status_code, 404)
+
+    def test_set_default_switches_translation_model(self):
+        self.create_ok()
+        other = self.create_ok(name="备用", model="deepseek-reasoner")
+
+        resp = self.client.post(f"/api/llm/models/{other['id']}/default")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["role"], "default_text")
+        self.assertEqual(config.get_llm_config()[2], "deepseek-reasoner")
+
+        roles = [m["role"] for m in config.list_models()]
+        self.assertEqual(roles.count("default_text"), 1)
+
+    def test_set_default_missing_model(self):
+        self.assertEqual(self.client.post("/api/llm/models/nope/default").status_code, 404)
+
+
+class TestPrompts(ConfigTestCase):
+    def test_empty_prompt_filled_from_preset(self):
+        card = self.create_ok(prompt="", prompt_preset="medical")
+        self.assertIn("医学", card["prompt"])
+        self.assertIn("【定名】", card["prompt"])
+
+    def test_custom_prompt_saved(self):
+        custom = ("你是医学术语翻译，翻译「{word}」。\n"
+                  "【定名】中文名\n【展开】全称\n【详解】解释\n【例句】例句\n【译文】翻译")
+        card = self.create_ok(prompt=custom, prompt_preset="custom")
+        self.assertEqual(card["prompt"], custom)
+
+    def test_prompt_missing_marker_rejected(self):
+        custom = "翻译「{word}」\n【定名】中文名\n【展开】全称\n【详解】解释"
+        body = self.create(prompt=custom, prompt_preset="custom")
         self.assertFalse(body["ok"])
-        self.assertIn("模型名", body["message"])
+        self.assertIn("【例句】", body["message"])
+        self.assertEqual(self.get_models()["models"], [])
+
+    def test_prompt_missing_word_placeholder_rejected(self):
+        custom = "翻译这个词\n【定名】中文名\n【展开】全称\n【详解】解释\n【例句】例句\n【译文】翻译"
+        body = self.create(prompt=custom, prompt_preset="custom")
+        self.assertFalse(body["ok"])
+        self.assertIn("{word}", body["message"])
+
+    def test_vision_prompt_is_cleared(self):
+        self.configure_text_env()
+        self.client.get("/api/llm/models")            # 初始化文本卡
+        card = self.create_ok(**VISION_PAYLOAD)
+        self.assertEqual(card["prompt"], "")
+        self.assertEqual(card["prompt_preset"], "custom")
+
+    def test_build_prompt_replaces_word(self):
+        text = config.build_prompt("token", "翻译「{word}」")
+        self.assertEqual(text, "翻译「token」")
+
+    def test_build_prompt_ignores_other_braces(self):
+        text = config.build_prompt("token", "输出 JSON：{'word': '{word}'}")
+        self.assertEqual(text, "输出 JSON：{'word': 'token'}")
 
 
 class TestVisionFallback(ConfigTestCase):
-    """视觉模型只填一个模型名就该能工作 —— 地址与 Key 回落文本模型"""
-
     def test_only_model_required(self):
-        self.configure_text_env()
-        body = self.put_config("vision", model="qwen3-vl-plus")
-        self.assertTrue(body["ok"], body)
-
-        saved = config.load_runtime_config("vision")
-        self.assertEqual(saved["base_url"], "")          # 留空就存空，回落保持动态
-        self.assertEqual(saved["model"], "qwen3-vl-plus")
-
-        base_url, api_key, model = config.get_vision_config()
-        self.assertEqual(base_url, "https://text.example/v1")
-        self.assertEqual(api_key, "sk-text-12345678")
-        self.assertEqual(model, "qwen3-vl-plus")
-
-    def test_vision_own_endpoint_wins(self):
-        self.save_runtime("text", "https://text.example/v1", "sk-text-12345678", "deepseek-chat")
-        self.save_runtime("vision", "https://vision.example/v1", "sk-vis-12345678", "qwen3-vl-plus")
+        self.create_ok()                              # 默认文本模型
+        card = self.create_ok(**VISION_PAYLOAD)
+        self.assertEqual(card["base_url"], "")
+        self.assertEqual(card["api_key"], "")
         self.assertEqual(config.get_vision_config(),
-                         ("https://vision.example/v1", "sk-vis-12345678", "qwen3-vl-plus"))
+                         ("https://text.example/v1", "sk-text-12345678", "qwen3-vl-plus"))
 
-    def test_blank_fields_fall_back_to_vision_env(self):
-        """.env 已配视觉端点时，表单留空应沿用该端点，而不是错落到文本模型"""
-        self.configure_text_env()                       # 文本模型在 deepseek 端点
-        self.set_env(LLM_VISION_BASE_URL="https://vision.example/v1",
-                     LLM_VISION_API_KEY="sk-vis-12345678")
-        body = self.put_config("vision", model="qwen3-vl-plus")
-        self.assertTrue(body["ok"], body)
-        args = self.probe.await_args.args
-        self.assertEqual(args[0], "https://vision.example/v1")
-        self.assertEqual(args[1], "sk-vis-12345678")
-
-    def test_vision_env_endpoint_beats_text_fallback(self):
-        """回落链顺序：LLM_VISION_* 优先于文本模型"""
-        self.configure_text_env()
-        self.set_env(LLM_VISION_BASE_URL="https://vision.example/v1",
-                     LLM_VISION_API_KEY="sk-vis-12345678")
-        self.assertEqual(config.fallback_credentials("vision"),
-                         ("https://vision.example/v1", "sk-vis-12345678"))
-
-    def test_saved_blank_fields_still_use_vision_env(self):
-        """只填模型名保存后，实际调用端点必须与保存时测试的端点一致
-
-        回归用例：运行时 vision 区块地址 / Key 为空时，仍要先看 .env 的
-        LLM_VISION_*，不能直接跳到文本模型 —— 否则「测试通过」的端点和
-        图片取词真正请求的端点会不是同一个。
-        """
-        self.configure_text_env()                       # 文本模型在 text 端点
-        self.set_env(LLM_VISION_BASE_URL="https://vision.example/v1",
-                     LLM_VISION_API_KEY="sk-vis-12345678")
-        self.assertTrue(self.put_config("vision", model="qwen3-vl-plus")["ok"])
-
-        probed = self.probe.await_args.args             # 保存时测的端点
-        self.assertEqual(config.get_vision_config(),     # 运行时用的端点
-                         (probed[0], probed[1], "qwen3-vl-plus"))
-        self.assertEqual(probed[0], "https://vision.example/v1")
-
-    def test_probe_uses_effective_values(self):
-        """留空回落时，连通测试必须拿真实生效值去试，而不是空串"""
-        self.configure_text_env()
-        self.put_config("vision", model="qwen3-vl-plus")
         args = self.probe.await_args.args
         self.assertEqual(args[0], "https://text.example/v1")
         self.assertEqual(args[1], "sk-text-12345678")
         self.assertEqual(args[2], "qwen3-vl-plus")
         self.assertEqual(args[3], "vision")
 
-    def test_vision_usable_via_env_only(self):
-        self.configure_text_env()
-        self.set_env(LLM_VISION_MODEL="glm-4v")
+    def test_vision_own_endpoint(self):
+        self.create_ok()
+        self.create_ok(**{**VISION_PAYLOAD,
+                          "base_url": "https://vision.example/v1",
+                          "api_key": "sk-vis-12345678"})
         self.assertEqual(config.get_vision_config(),
-                         ("https://text.example/v1", "sk-text-12345678", "glm-4v"))
+                         ("https://vision.example/v1", "sk-vis-12345678", "qwen3-vl-plus"))
 
-    def test_vision_needs_model_even_with_credentials(self):
-        """只有地址和 Key、没有模型名 —— 仍算未配置（文本模型不接受图片）"""
-        self.configure_text_env()
-        self.assertIsNone(config.get_vision_config())
+    def test_vision_needs_model(self):
+        self.create_ok()
+        body = self.create(**{**VISION_PAYLOAD, "model": "  "})
+        self.assertFalse(body["ok"])
+        self.assertIn("模型名", body["message"])
 
-    def test_vision_save_rejected_without_any_fallback(self):
-        """没有任何可回落的配置时，只填模型名无法完成连通测试，应拒绝保存"""
-        body = self.put_config("vision", model="qwen3-vl-plus")
+    def test_vision_rejected_without_fallback(self):
+        body = self.create(**VISION_PAYLOAD)
         self.assertFalse(body["ok"])
         self.assertIn("Base URL", body["message"])
-        self.assertIsNone(config.load_runtime_config("vision"))
+        self.assertEqual(self.get_models()["models"], [])
 
 
-class TestSectionsAreIsolated(ConfigTestCase):
-    def test_saving_vision_keeps_text(self):
-        self.put_config("text", base_url="https://text.example/v1",
-                        api_key="sk-text-12345678", model="deepseek-chat")
-        self.put_config("vision", base_url="https://vision.example/v1",
-                        api_key="sk-vis-12345678", model="qwen3-vl-plus")
-        self.assertEqual(config.load_runtime_config("text")["model"], "deepseek-chat")
-        self.assertEqual(config.load_runtime_config("vision")["model"], "qwen3-vl-plus")
+class TestProbe(ConfigTestCase):
+    def test_probe_uses_effective_values(self):
+        self.create_ok()
+        args = self.probe.await_args.args
+        self.assertEqual(args[:3], ("https://text.example/v1",
+                                    "sk-text-12345678", "deepseek-chat"))
 
-    def test_deleting_vision_keeps_text(self):
-        self.put_config("text", base_url="https://text.example/v1",
-                        api_key="sk-text-12345678", model="deepseek-chat")
-        self.configure_text_env()          # 视觉模型只填模型名，靠环境变量回落
-        self.assertTrue(self.put_config("vision", model="qwen3-vl-plus")["ok"])
+    def test_test_endpoint_restores_masked_key(self):
+        card = self.create_ok()
+        masked = self.get_models()["models"][0]["api_key"]
+        self.probe.reset_mock()
 
-        resp = self.client.delete("/api/llm/config", params={"kind": "vision"})
-        self.assertEqual(resp.status_code, 200)
-        self.assertIsNone(config.load_runtime_config("vision"))
-        self.assertEqual(config.load_runtime_config("text")["model"], "deepseek-chat")
+        resp = self.client.post("/api/llm/models/test",
+                                json={**TEXT_PAYLOAD, "api_key": masked, "id": card["id"]})
+        self.assertTrue(resp.json()["ok"])
+        self.assertEqual(self.probe.await_args.args[1], "sk-text-12345678")
 
-    def test_deleting_last_section_removes_file(self):
-        self.configure_text_env()
-        self.assertTrue(self.put_config("vision", model="qwen3-vl-plus")["ok"])
-        self.assertTrue(config.CONFIG_FILE.exists())
-        self.client.delete("/api/llm/config", params={"kind": "vision"})
-        self.assertFalse(config.CONFIG_FILE.exists())
+    def test_test_endpoint_does_not_save(self):
+        before = self.get_models()
+        self.client.post("/api/llm/models/test", json=TEXT_PAYLOAD)
+        self.assertEqual(self.get_models()["models"], before["models"])
 
 
-class TestRuntimeState(ConfigTestCase):
-    def test_state_none(self):
-        state = config.runtime_state("vision")
-        self.assertEqual(state["source"], "none")
-        self.assertFalse(state["has_runtime"])
-
-    def test_state_runtime_with_blank_fields_still_visible(self):
-        """留空回落的视觉配置要能回显出来，否则设置页会显示成「未配置」"""
-        self.save_runtime("vision", "", "", "qwen3-vl-plus")
-        state = config.runtime_state("vision")
-        self.assertEqual(state["source"], "runtime")
-        self.assertTrue(state["has_runtime"])
-        self.assertEqual(state["model"], "qwen3-vl-plus")
-        self.assertEqual(state["base_url"], "")
-        self.assertEqual(config.mask_key(state["api_key"]), "")
-
-    def test_text_state_requires_all_three(self):
-        """文本模型缺字段算未配置（没有可回落对象）"""
-        self.save_runtime("text", "https://x/v1", "", "m")
-        self.assertIsNone(config.load_runtime_config("text"))
-
-
-class TestVisionProbePayload(unittest.IsolatedAsyncioTestCase):
-    """视觉连通测试要真的发一张图 —— 否则测不出端点是否支持图片输入"""
+class TestProbePayload(unittest.IsolatedAsyncioTestCase):
+    """连通测试的请求体：视觉模型必须真的带图，文本模型只发纯文本"""
 
     def _client(self, status_code=200):
         resp = AsyncMock()
@@ -308,8 +347,8 @@ class TestVisionProbePayload(unittest.IsolatedAsyncioTestCase):
         import base64
         import struct
         png = base64.b64decode(route_mod.TEST_IMAGE_B64)
-        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")          # 确实是 PNG
-        width, height = struct.unpack(">II", png[16:24])         # 读 IHDR
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        width, height = struct.unpack(">II", png[16:24])
         self.assertGreater(width, 10)
         self.assertGreater(height, 10)
 
@@ -345,15 +384,13 @@ class TestPureHelpers(unittest.TestCase):
         self.assertEqual(config.mask_key("short"), "*****")
         self.assertEqual(config.mask_key(""), "")
 
-    def test_current_api_key_reads_section(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_dir = Path(tmp)
-            with patch.multiple(config, CONFIG_DIR=tmp_dir,
-                                CONFIG_FILE=tmp_dir / "llm_config.json"), \
-                    patch.dict(os.environ, {key: "" for key in ENV_KEYS}):
-                # 区块里没存 Key，且无处可回落 → 空
-                config.save_runtime_config("vision", "", "", "qwen3-vl-plus")
-                self.assertEqual(config.current_api_key("vision"), "")
-                # 区块里存了完整 Key → 直接返回
-                config.save_runtime_config("vision", "", "sk-vis-12345678", "qwen3-vl-plus")
-                self.assertEqual(config.current_api_key("vision"), "sk-vis-12345678")
+    def test_validate_prompt(self):
+        self.assertTrue(config.validate_prompt(""))
+        self.assertIn("【定名】", config.validate_prompt("翻译 {word}"))
+        self.assertEqual(config.validate_prompt(config.preset_prompt("llm")), "")
+
+    def test_unknown_preset_falls_back_to_custom(self):
+        card = config._clean_model({"type": "text", "prompt_preset": "banana",
+                                    "prompt": "", "model": "m"})
+        self.assertEqual(card["prompt_preset"], "llm")
+        self.assertIn("【定名】", card["prompt"])

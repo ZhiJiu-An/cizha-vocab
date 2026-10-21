@@ -5,10 +5,8 @@
 点击候选词回填搜索框并触发现有双栏查询。
 
 配置由 config.py 统一管理，代码不硬编码 Key ——
-可在「⚙️ 设置」页的视觉模型卡片里改（无需重启），也可走环境变量：
-  LLM_VISION_MODEL     必填，视觉模型名（如 qwen3-vl-plus / glm-4v）
-  LLM_VISION_BASE_URL  可选，缺省回落 LLM_BASE_URL
-  LLM_VISION_API_KEY   可选，缺省回落 LLM_API_KEY
+在「设置 → 模型配置」里新增或编辑视觉模型即可，无需重启（v0.12 起为模型列表）。
+视觉模型的 Base URL / API Key 可留空，读取时回落到默认文本模型。
 DeepSeek 官方 API 无视觉模型，故支持独立端点以便接任意 OpenAI 兼容视觉服务。
 """
 import base64
@@ -106,8 +104,7 @@ async def extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not config:
         raise HTTPException(
             status_code=400,
-            detail="未配置视觉模型：请在「⚙️ 设置」页的视觉模型卡片里填写模型名，"
-                   "或在 backend/.env 设置 LLM_VISION_MODEL 后重启服务",
+            detail="未配置视觉模型：请在「设置 → 模型配置」里添加一个视觉模型并设为默认",
         )
     base_url, api_key, model = config
 
