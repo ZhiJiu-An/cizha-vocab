@@ -89,6 +89,15 @@
               >
                 {{ queueBusy ? '处理中…' : (word.in_review ? '⏸ 移出队列' : '▶ 加入队列') }}
               </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                :disabled="queueBusy"
+                style="margin-top: 6px"
+                title="把档位与累计次数清零，当作新词重新开始"
+                @click="resetProgress"
+              >
+                ↺ 重置进度
+              </button>
             </div>
           </div>
 
@@ -120,7 +129,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Phonetics from './Phonetics.vue'
 import WordBadge from './WordBadge.vue'
-import { getWord, updateWord } from '../api'
+import { getWord, resetReviewProgress, updateWord } from '../api'
 import { cardType, nextReviewLabel, parseTags, relativeTime, stageDays, toast } from '../utils'
 
 const props = defineProps({
@@ -150,6 +159,22 @@ async function toggleQueue() {
   try {
     word.value = await updateWord(word.value.id, { in_review: next })
     toast(next ? '已加入复习队列' : '已移出复习队列', 'success')
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    queueBusy.value = false
+  }
+}
+
+// 重置复习进度（v0.11）：误点「记住」把档位推进去后的补救路径
+async function resetProgress() {
+  if (!word.value || queueBusy.value) return
+  if (!confirm(`把「${word.value.abbreviation}」的复习进度清零，当作新词重新开始？`)) return
+  queueBusy.value = true
+  try {
+    await resetReviewProgress(word.value.id)
+    word.value = await getWord(props.wordId)
+    toast('复习进度已重置', 'success')
   } catch (e) {
     toast(e.message, 'error')
   } finally {
