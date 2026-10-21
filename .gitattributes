@@ -1,0 +1,13 @@
+# 跨平台行尾约定
+#
+# Windows 批处理（.bat / .cmd）必须用 CRLF：cmd.exe 解析 LF-only 的批处理时，
+# goto 标签与括号块容易报 "The system cannot find the batch label specified"。
+# Shell 脚本必须用 LF，否则 bash 会报 "$'\r': command not found"。
+#
+# 注意：这里用 text eol=...（入库统一 LF、检出按平台转换）。
+# 若希望「从 GitHub 下载 ZIP 后 .bat 也是 CRLF」，需改成 -text 让内容原样入库，
+# 代价是该文件在 diff 中按二进制展示。
+*.sh   text eol=lf
+*.bash text eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
