@@ -43,11 +43,11 @@ node -e 'const [a,b]=process.versions.node.split(".").map(Number); const ok=(a==
 echo "==> 创建 Python 虚拟环境 backend/venv"
 python3 -m venv backend/venv
 
-echo "==> 安装后端依赖（索引：$PIP_INDEX）"
+echo "==> 安装后端依赖（索引：${PIP_INDEX}）"
 backend/venv/bin/python -m pip install --upgrade pip -q || { network_hint; exit 1; }
 backend/venv/bin/python -m pip install -r backend/requirements.txt || { network_hint; exit 1; }
 
-echo "==> 安装并构建前端（registry：$NPM_REGISTRY）"
+echo "==> 安装并构建前端（registry：${NPM_REGISTRY}）"
 (
   cd frontend
   if [ -f package-lock.json ]; then
