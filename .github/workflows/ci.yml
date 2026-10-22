@@ -75,3 +75,74 @@ jobs:
         run: |
           test -f dist/index.html
           test -d dist/assets
+
+  smoke:
+    name: 脚本检查 + 一键安装冒烟
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # shellcheck 在 ubuntu-latest 上通常已预装，缺失时再补装
+      - name: 检查 shell 脚本
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y shellcheck
+          fi
+          bash -n setup.sh start.sh
+          shellcheck --severity=error setup.sh start.sh
+
+      # 真实走一遍新用户路径：装依赖 + 构建前端 + 生成 .env
+      - name: 一键安装（setup.sh）
+        run: ./setup.sh
+
+      # 用 start.sh 启动真实服务，验证健康检查、404 契约与前端托管
+      - name: 启动并验证（start.sh）
+        env:
+          CIZHA_NO_OPEN: "1"
+          CIZHA_PORT: "8123"
+          CIZHA_DB_PATH: /tmp/cizha-smoke.db
+        run: |
+          ./start.sh > /tmp/cizha-start.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          curl -fsS --retry 40 --retry-delay 2 --retry-connrefused \
+            http://127.0.0.1:8123/api/health | tee /tmp/health.json
+          echo
+          python - <<'PY'
+          import json
+          with open("/tmp/health.json", encoding="utf-8") as f:
+              data = json.load(f)
+          assert data.get("version"), data
+          print("health ok:", data["version"])
+          PY
+
+          # 未匹配的 API 路径必须返回中文 JSON 404（回归保护）
+          code=$(curl -s -o /tmp/notfound.json -w '%{http_code}' \
+            http://127.0.0.1:8123/api/does-not-exist)
+          echo "unknown api: status=$code body=$(cat /tmp/notfound.json)"
+          test "$code" = "404"
+          grep -q '接口不存在' /tmp/notfound.json
+
+          # setup.sh 已构建前端，根路径应返回 SPA 页面
+          curl -fsS http://127.0.0.1:8123/ | grep -q 'id="app"'
+          echo "spa ok"
+
+      - name: 失败时输出启动日志
+        if: failure()
+        run: cat /tmp/cizha-start.log 2>/dev/null || true
