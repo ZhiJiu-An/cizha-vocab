@@ -5,14 +5,21 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-22
+
 ### 修复
 
 - 未知 API 路径在未构建前端时返回英文 `Not Found`，现统一返回 JSON 404 `接口不存在`（CI 环境依赖前端产物的问题）
 - `setup.sh` 中全角括号紧贴变量名导致 `set -u` 报 `unbound variable`，安装中断
 
+### 变更
+
+- 版本号统一为 `0.1.1`：`/api/health`、前端 `package.json`、词典请求 User-Agent
+- 新增 CI 冒烟任务：`bash -n` + shellcheck、真实执行 `setup.sh`、`start.sh` 启动后校验健康接口 / 中文 404 / SPA 托管
+
 ### 文档
 
-- 版本徽章统一为 `v0.1.0` 并链接 Release 页
+- 版本徽章链接到 Release 页，便于直接查看最新版本
 - 更新界面截图（词典 / 复习 / 统计 / 词库）
 - 新增 CHANGELOG、CONTRIBUTING、SECURITY 与 Issue / PR 模板
 
@@ -36,5 +43,6 @@
 - `.env`、`backend/data/`（含用户配置与 API Key）不纳入版本控制
 - 历史提交中的作者邮箱统一为 GitHub noreply 地址
 
-[Unreleased]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.1.0

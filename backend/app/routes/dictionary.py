@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/dictionary", tags=["词典"])
 
 API_URL = "https://dict.youdao.com/jsonapi"
 TIMEOUT = 6  # 秒, 避免请求过久无响应
-USER_AGENT = "cizha-vocab/0.14"
+USER_AGENT = "cizha-vocab/0.1.1"
 
 
 async def _fetch(word: str):
