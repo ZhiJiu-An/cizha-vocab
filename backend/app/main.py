@@ -11,7 +11,7 @@ from .database import engine, Base
 from .routes import words, dictionary, translate, stats, ocr, review, llm_config
 
 # 版本号只在这里定义一次，/api/health 与根路径兜底都引用它
-APP_VERSION = "0.14.0"
+APP_VERSION = "0.1.1"
 APP_NAME = "词札单词库"
 
 # 加载 backend/.env 中的环境变量（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 等）

@@ -6,11 +6,11 @@
 
 面向 AI / 大模型从业者的英文术语记录本
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-34674f?style=flat-square)](https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.1.0)
+[![Version](https://img.shields.io/badge/version-v0.1.1-34674f?style=flat-square)](https://github.com/ZhiJiu-An/cizha-vocab/releases/latest)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.5-42B883?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
-[![Tests](https://img.shields.io/badge/tests-204%20passed-34674f?style=flat-square)](backend/tests)
+[![Tests](https://img.shields.io/badge/tests-210%20passed-34674f?style=flat-square)](backend/tests)
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230?style=flat-square)](https://github.com/astral-sh/ruff)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](LICENSE)
 
