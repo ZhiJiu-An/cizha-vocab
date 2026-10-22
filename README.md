@@ -363,12 +363,14 @@ cd ../frontend && npm run build
 
 ## Contributing
 
+环境搭建、代码结构、提交规范与 PR 要求的完整说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。简要流程：
+
 1. Fork 仓库并创建分支：`feat/xxx`、`fix/xxx`
 2. 保持提交信息遵循 `feat:` / `fix:` / `docs:` / `style:` 前缀
 3. 提交前确保 `ruff check app tests` 与全量单元测试通过
 4. 发起 Pull Request，说明改动动机与验证方式
 
-如果是较大的功能调整，建议先开 Issue 对齐方案，避免重复劳动。
+如果是较大的功能调整，建议先开 Issue 对齐方案，避免重复劳动。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要公开提 Issue。版本变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 

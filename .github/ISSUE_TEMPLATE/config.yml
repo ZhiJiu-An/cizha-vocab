@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用问题与讨论
+    url: https://github.com/ZhiJiu-An/cizha-vocab/discussions
+    about: 安装配置、使用疑问和开放讨论请到这里
+  - name: 安全漏洞
+    url: https://github.com/ZhiJiu-An/cizha-vocab/security/advisories/new
+    about: 请不要公开提交安全问题，使用私密报告通道

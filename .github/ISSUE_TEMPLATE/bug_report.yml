@@ -1,0 +1,97 @@
+name: Bug 报告
+description: 报告可复现的功能异常
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量提供可复现的步骤；安全问题请勿在此提交，见 [SECURITY.md](https://github.com/ZhiJiu-An/cizha-vocab/blob/main/SECURITY.md)。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 发生了什么？涉及哪个页面或接口？
+      placeholder: 在「复习」页面点击「记住」后……
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从启动开始的完整操作路径
+      placeholder: |
+        1. ./start.sh
+        2. 打开 http://127.0.0.1:8000
+        3. 进入词库，点击……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 若有报错，请贴出后端终端日志或浏览器控制台信息
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: 运行方式
+      options:
+        - ./setup.sh + ./start.sh（一键脚本）
+        - 手动启动（uvicorn + vite）
+        - 单端口托管（npm run build 后只跑 uvicorn）
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: 环境信息
+      description: 操作系统、Python 版本、Node 版本、浏览器
+      placeholder: macOS 14 / Python 3.12 / Node 22.12 / Chrome 130
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      description: Release 版本号或 `git rev-parse --short HEAD` 输出
+      placeholder: v0.1.0 或 a1b2c3d
+    validations:
+      required: false
+
+  - type: dropdown
+    id: model
+    attributes:
+      label: 使用的模型提供方
+      description: 与 LLM 相关的问题请选择对应服务
+      options:
+        - 未配置 / 与模型无关
+        - OpenAI 兼容接口
+        - Anthropic
+        - 其他（在描述中说明）
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认事项
+      options:
+        - label: 已搜索现有 Issue，未发现重复
+          required: true
+        - label: 已检查 backend/data/ 与 backend/.env 中的配置是否正确
+          required: false
