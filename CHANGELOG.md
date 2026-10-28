@@ -10,19 +10,45 @@
 - **Tauri 2 桌面壳层（Phase 3-4 ✅）**
   - `src-tauri/`：完整 Tauri 2 桌面项目（壳层 + sidecar + 托盘 + 全局快捷键）
   - `src-tauri/src/main.rs`：
-    - spawn PyInstaller sidecar → 探测可用端口 → 等待后端就绪 → WebView 加载前端
+    - spawn PyInstaller onedir 后端 → 探测可用端口 → 后台轮询 `/api/health` 就绪 → WebView 加载前端（不阻塞 UI）
+    - 启动页改为 `frontend/public/loading.html`，避免 eval 注入被丢弃/覆盖导致的白屏、卡 loading
+    - 启动失败自动换端口重试一次；仍失败时在启动页显示具体原因，而不是无限等待或直接闪退
     - 系统托盘（右键菜单：打开 / 隐藏 / 退出；左键切换窗口可见性）
     - 全局快捷键 Cmd+Shift+C（唤起/隐藏窗口）
-    - CloseRequested → 隐藏到托盘（不退出），退出时 kill sidecar
-  - `src-tauri/capabilities/default.json`：sidecar spawn + global-shortcut 权限
+    - CloseRequested → 隐藏到托盘（不退出），退出时 kill 后端进程（不再残留后台服务）
+  - `src-tauri/capabilities/default.json`：global-shortcut 权限
   - `src-tauri/icons/`：自动生成全套图标（icon.png / 32x32 / 128x128 / icon.ico / icon.icns）
-  - `scripts/prepare-sidecar.py`：PyInstaller 产物按 platform triple 重命名
+  - `scripts/prepare-sidecar.py`：把 PyInstaller onedir 产物复制到 `src-tauri/resources/backend/`
   - `scripts/generate-icons.py`：PIL 画图标 + iconutil 生成 icns
-  - `cargo tauri build` 产物：词札.app (34 MB) + 词札_0.2.1_aarch64.dmg (24 MB)
+  - `cargo tauri build` 产物：词札.app (95 MB) + 词札_0.2.1_aarch64.dmg (42 MB)
 
 - **多平台 PyInstaller CI（Phase 2 ✅）**
-  - `.github/workflows/desktop_build.yml`：tag `v*` 时自动并发打 macOS arm64 / Linux amd64 / Windows amd64 三份 PyInstaller 二进制，挂 Release 附件
-  - v0.2.1 Release 产物：darwin-arm64 (20.1 MB)、linux-amd64 (40.7 MB)、windows-amd64.exe (20.6 MB)
+  - `.github/workflows/desktop_build.yml`：tag `v*` 时自动并发打 macOS arm64 / Linux amd64 / Windows amd64 三份 PyInstaller onedir 产物，打包为 tar.gz 挂 Release 附件
+
+### 修复
+
+- **桌面版启动慢 / 卡 loading / 偶发启动失败**
+  - PyInstaller 由 onefile 改为 onedir：启动不再每次解压 ~39MB，实测就绪时间从 ~6 秒降到 0.6~2 秒
+  - 启动页由 `eval(document.write(...))` 改为静态 `loading.html`：不会出现 eval 丢失导致的白屏，也不会晚于跳转覆盖前端
+  - 等待后端就绪从「端口被占用」改为真实 HTTP `/api/health` 探测，超时 30 秒并自动重试一次
+  - 退出时（Cmd+Q / 托盘退出）统一 kill 后端子进程，修复多次启动后残留僵尸后端的问题
+
+- **桌面壳层遗留问题（单实例 / 异常退出 / 日志）**
+  - 接入 `tauri-plugin-single-instance`：重复启动只唤起已有窗口，不再出现第二个托盘图标、第二个后端，也避免两个进程同时读写同一个 SQLite
+  - 接管 SIGTERM / SIGINT / SIGHUP：注销、`kill`、Ctrl+C 不再留下孤儿后端；清理顺序改为先 SIGTERM 优雅关闭、3 秒未退出再强杀，并在 `pre_exec` 里重置子进程信号掩码（否则后端继承屏蔽字后收不到 SIGTERM）
+  - 后端 stdout/stderr 写入 `~/Library/Logs/com.cizha.vocab/backend.log`（超过 5MB 轮转 `.log.1`），启动失败提示直接给出日志路径，不再「丢弃输出 + 提示看系统日志」
+
+- **桌面壳层遗留问题（P2：崩溃恢复 / 端口竞态 / 打包校验）**
+  - 启动成功后看护后端：进程崩溃会自动回到启动页并重启（失败时显示原因，20 秒后再试）
+  - 页面导航失败不再静默：错误会写回启动页，不会永远停在 loading
+  - 端口改为 `--port 0` 由系统分配，后端就绪后把实际端口写进 ready 文件回传，彻底消除「先探测空端口再 bind」的竞态
+  - `prepare-sidecar.py` 额外生成 `backend-manifest.json`；`build.rs` 在 release 构建时校验 exe 大小与文件数，缺资源或后端产物过期会直接报错，避免把旧后端打进 App
+
+- **发布工程（签名 / 公证暂缓）**
+  - CI 新增 macOS App 构建任务：打 `v*` tag 时自动产出 `.dmg` 并挂到 Release（未签名，首次打开仍需右键「打开」）
+  - 版本号统一为 0.2.1（Tauri / Cargo / 前端 / 后端 `APP_VERSION` / 有道 UA）
+  - 主窗口改为 `visible: false`，等 loading 页画出首帧后再显示，消除启动瞬间的白底闪烁
+  - `.gitignore` 补上 `build/cizha-backend/`（手动指定 `--workpath build` 时的 PyInstaller 中间目录）
 
 - **桌面 App 后端引擎（Phase 0-1 ✅）**
   - `backend/app/paths.py`：统一资源路径，首次启动把 SQLite / llm_config.json / .env 复制到用户目录（macOS `~/Library/Application Support/cizha/`、Windows `%APPDATA%/cizha/`、Linux `$XDG_DATA_HOME/cizha/`）

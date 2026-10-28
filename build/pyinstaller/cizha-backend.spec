@@ -4,7 +4,13 @@
 #   backend/venv/bin/python -m PyInstaller build/pyinstaller/cizha-backend.spec \
 #       --noconfirm --workpath _pybuild --distpath dist
 #
-# 产物：dist/cizha-backend（单文件 Mach-O）
+# 产物：dist/cizha-backend/（onedir 目录：可执行文件 + _internal/）
+#
+# 为什么用 onedir 而不是 onefile：
+#   onefile 每次启动都要把 ~39MB 内容解压到临时目录，实测启动到端口就绪要 6 秒；
+#   onedir 首次约 2 秒、之后 0.5 秒内，桌面端「双击即用」的体感差别很大。
+#   目录由 scripts/prepare-sidecar.py 复制进 src-tauri/resources/backend/，
+#   再由 Tauri bundle.resources 打进 App。
 #
 # Phase 1 完成内容：
 #   - SQLite / llm_config.json / .env 首次启动自动复制到用户目录
@@ -14,7 +20,6 @@
 #   - 前端 dist 嵌入，FastAPI 直接托管静态页面
 #
 # 已知限制：
-#   - 首次启动解压 ~39MB 二进制，约 10-12 秒就绪
 #   - 未做代码签名 / notarization
 #   - 不跨平台（macOS arm64 单文件不能在 Windows 跑）
 #
@@ -70,15 +75,22 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="cizha-backend",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    runtime_tmpdir=None,
     console=True,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    name="cizha-backend",
 )
