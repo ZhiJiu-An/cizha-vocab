@@ -35,12 +35,54 @@ const MENU_SHOW: &str = "show";
 const MENU_HIDE: &str = "hide";
 const MENU_QUIT: &str = "quit";
 
+// 启动 loading 页面（蓝色渐变 + Logo + 加载中动画）
+const LOADING_HTML: &str = r#"
+(() => {
+  document.open();
+  document.write(`<!doctype html><html><head><meta charset="UTF-8"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      height: 100vh; width: 100vw;
+      background: linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+      color: white;
+    }
+    .logo {
+      font-size: 120px; font-weight: 300; letter-spacing: -4px;
+      text-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      margin-bottom: 32px;
+    }
+    .title { font-size: 20px; font-weight: 500; opacity: 0.9; }
+    .dots { display: flex; gap: 8px; margin-top: 24px; }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.6);
+      animation: bounce 1.4s infinite ease-in-out both;
+    }
+    .dot:nth-child(1) { animation-delay: -0.32s; }
+    .dot:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0); }
+      40% { transform: scale(1); }
+    }
+  </style></head><body>
+  <div class="logo">C</div>
+  <div class="title">词札 · 加载中</div>
+  <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+  </body></html>`);
+  document.close();
+})();
+"#;
+
 fn main() {
     tauri::Builder::default()
         // macOS 会自动提供默认菜单栏（词札 / 文件 / 编辑 / 视图 / 窗口 / 帮助）
         // 已包含 Cmd+Q 退出、Cmd+W 关闭、Cmd+M 最小化 等原生行为
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // macOS: show 窗口时强制激活（抢回焦点到最前，不管其他 App 是否在最前）
+        .activate_ignoring_other_apps(true)
         .setup(|app| {
             // 1. 探测可用端口（从 18765 开始，避免常见端口）
             let port = find_free_port(18765).expect("找不到可用端口");
@@ -52,43 +94,52 @@ fn main() {
                 backend: Mutex::new(None),
             });
 
-            // 2. spawn sidecar
+            // 2. 创建主窗口 + 立即显示 loading（让用户看到进度，不等后端）
+            let main_window = app
+                .get_webview_window("main")
+                .ok_or("找不到 main 窗口")?;
+
+            // 先显示一个 loading 页面
+            main_window.show().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            main_window.set_focus().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            let _ = main_window.eval(LOADING_HTML);
+
+            println!("🖥️  loading 窗口已显示");
+
+            // 3. spawn sidecar
             let backend_child = spawn_backend_sidecar(app.handle(), port);
 
-            // 3. 等待后端就绪
+            // 4. 等待后端就绪（去掉硬编码 1500ms sleep，端口 ready 就够了）
             println!("⏳ 等待后端启动...");
             if let Err(e) = wait_for_port(port, 15, Duration::from_millis(500)) {
                 eprintln!("❌ 后端启动失败: {}", e);
                 return Err(Box::new(e));
             }
-            thread::sleep(Duration::from_millis(1500));
             println!("✅ 后端就绪，监听 http://127.0.0.1:{}", port);
 
-            // 4. 保存 child handle 到状态
+            // 5. 保存 child handle 到状态
             if let Some(state) = app.try_state::<AppState>() {
                 *state.backend.lock().unwrap() = backend_child;
             }
 
-            // 5. 创建主窗口（初始 hidden，等后端 ready 再显示）
-            let main_window = app
-                .get_webview_window("main")
-                .ok_or("找不到 main 窗口")?;
-
+            // 6. 后端 ready → 正式加载前端（自动触发 activate_ignoring_other_apps）
             let url = format!("http://127.0.0.1:{}/", port);
             let parsed_url = Url::parse(&url)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             main_window
                 .navigate(parsed_url)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-            main_window.show().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-            main_window.set_focus().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-            println!("🖥️  窗口已显示，加载 {}", url);
+            // 再确保一次焦点（activate_ignoring_other_apps 已在 Builder 设了，
+            // show/set_focus 会自动带 ignoringOtherApps 行为）
+            let _ = main_window.set_focus();
 
-            // 6. 创建托盘图标
+            println!("✅ 前端已加载，窗口在最前");
+
+            // 7. 创建托盘图标
             setup_tray(app.handle())?;
 
-            // 7. 注册全局快捷键 Cmd+Shift+C
+            // 8. 注册全局快捷键 Cmd+Shift+C
             setup_shortcuts(app.handle())?;
 
             Ok(())
