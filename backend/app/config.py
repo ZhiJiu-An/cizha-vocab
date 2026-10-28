@@ -30,9 +30,10 @@
 import json
 import os
 import uuid
-from pathlib import Path
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "data"
+from .paths import get_data_dir
+
+CONFIG_DIR = get_data_dir()
 CONFIG_FILE = CONFIG_DIR / "llm_config.json"
 
 SCHEMA_VERSION = 2
