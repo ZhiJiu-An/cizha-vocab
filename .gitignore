@@ -46,3 +46,9 @@ _pybuild/
 dist/
 backend/build/
 backend/*.spec
+
+# ===== Tauri 桌面壳层 =====
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/
+src-tauri/Cargo.lock
