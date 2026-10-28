@@ -1,0 +1,25 @@
+[package]
+name = "cizha-vocab-desktop"
+version = "0.2.1"
+description = "词札 - Cizha Vocab 桌面壳层（Tauri + PyInstaller sidecar）"
+authors = ["ZhiJiu-An <165637525+ZhiJiu-An@users.noreply.github.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "custom-protocol"] }
+tauri-plugin-shell = "2"
+url = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 最小化 HTTP client —— 只用标准库做 health 探测，不引入 reqwest/ureq
+
+[features]
+# 默认启用自定义协议，用于前端与后端通信协议
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

@@ -7,11 +7,20 @@
 
 ### 新增
 
-- **桌面 App（预览）**：Phase 0 PyInstaller 可行性验证 → Phase 1 补完数据持久化 + 前端嵌入
+- **Tauri 桌面壳层（Phase 3 进行中）**
+  - `src-tauri/`：Tauri 2 壳层目录（Cargo.toml + tauri.conf.json + build.rs + main.rs）
+  - `src-tauri/src/main.rs`：spawn PyInstaller sidecar → 探测可用端口 → 等待后端就绪 → 创建 WebView 窗口加载 `http://127.0.0.1:{port}/`
+  - `src-tauri/capabilities/default.json`：sidecar spawn 权限（`--host 127.0.0.1 --port <port>`）
+  - `scripts/prepare-sidecar.py`：把 PyInstaller 产物按 platform triple 重命名放到 `src-tauri/binaries/`
+
+- **多平台 PyInstaller CI（Phase 2 ✅）**
+  - `.github/workflows/desktop_build.yml`：tag `v*` 时自动并发打 macOS arm64 / Linux amd64 / Windows amd64 三份 PyInstaller 二进制，挂 Release 附件
+  - v0.2.1 Release 产物：darwin-arm64 (20.1 MB)、linux-amd64 (40.7 MB)、windows-amd64.exe (20.6 MB)
+
+- **桌面 App 后端引擎（Phase 0-1 ✅）**
   - `backend/app/paths.py`：统一资源路径，首次启动把 SQLite / llm_config.json / .env 复制到用户目录（macOS `~/Library/Application Support/cizha/`、Windows `%APPDATA%/cizha/`、Linux `$XDG_DATA_HOME/cizha/`）
   - `backend/run.py`：PyInstaller 入口脚本，替代 `uvicorn app.main:app` 命令行方式
   - `build/pyinstaller/cizha-backend.spec`：打包配置，`collect_all app` 确保 FastAPI 路由隐式 import 全收
-  - `.github/workflows/desktop_build.yml`：tag `v*` 时自动并发打 macOS / Linux / Windows 三份 PyInstaller 二进制，挂 Release 附件
 
 ## [0.1.1] - 2026-10-22
 
