@@ -1,18 +1,25 @@
 <div align="center">
 
-# 词札单词库
+# 词札 — macOS 桌面版 ✨
 
 **查得到 · 记得下 · 找得快**
 
-面向 AI / 大模型从业者的英文术语记录本
+面向 AI / 大模型从业者的英文术语记录本 · **原生 macOS App**
 
-[![Version](https://img.shields.io/badge/version-v0.1.1-34674f?style=flat-square)](https://github.com/ZhiJiu-An/cizha-vocab/releases/latest)
+[![Version](https://img.shields.io/badge/version-v0.2.1-34674f?style=flat-square)](https://github.com/ZhiJiu-An/cizha-vocab/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=flat-square&logo=apple)](https://github.com/ZhiJiu-An/cizha-vocab/releases)
+[![Tauri](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri)](https://tauri.app/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.5-42B883?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Tests](https://img.shields.io/badge/tests-210%20passed-34674f?style=flat-square)](backend/tests)
-[![Ruff](https://img.shields.io/badge/lint-ruff-261230?style=flat-square)](https://github.com/astral-sh/ruff)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](LICENSE)
+
+<br>
+
+<a href="https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.1/词札_0.2.1_aarch64.dmg">
+  <strong>⬇️ 下载词札 for macOS Apple Silicon (.dmg · 42 MB)</strong>
+</a>
 
 </div>
 
@@ -20,6 +27,7 @@
 
 ## 目录
 
+- [桌面端下载](#桌面端下载)
 - [为什么做这个](#为什么做这个)
 - [界面展示](#界面展示)
 - [功能特性](#功能特性)
@@ -35,6 +43,22 @@
 - [Contributing](#contributing)
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
+
+---
+
+## 桌面端下载
+
+词札 v0.2.1 起提供原生 macOS App（Tauri 2 壳层 + PyInstaller Python 后端），**双击 .dmg → 拖到 Applications → 右键打开**即可使用。
+
+| 平台 | 文件 | 说明 |
+|---|---|---|
+| macOS Apple Silicon | [词札_0.2.1_aarch64.dmg](https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.1/词札_0.2.1_aarch64.dmg) | 42 MB · macOS 12.0+ |
+| macOS Intel | 源码构建 | 见下方 [快速开始](#快速开始) |
+| PyInstaller 三平台二进制 | [Releases 页面](https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.2.1) | darwin-arm64 / linux-amd64 / windows-amd64 |
+
+**首次打开说明**：macOS 安全机制会弹出「无法打开 — 无法验证开发者」。右键词札 → 打开 → 再点打开即可，之后双击正常。
+
+详细说明见 [macOS 安装指南](docs/desktop/macOS-安装指南.md)。
 
 ---
 
