@@ -1,33 +1,52 @@
-//! 词札桌面壳层 —— Tauri + PyInstaller sidecar
+//! 词札桌面壳层 —— Tauri + PyInstaller 后端
 //!
 //! 职责：
-//!   1. spawn PyInstaller 打包的后端二进制做 sidecar 子进程
-//!   2. 探测可用端口 → 传 --port 给后端
-//!   3. 等待后端就绪 → 创建 WebView 窗口加载 http://127.0.0.1:{port}/
+//!   1. spawn PyInstaller 打包的后端（onedir 产物，随 App 资源一起分发）
+//!   2. 用 `--port 0` 让系统分配端口，后端把实际端口写进 ready 文件回传
+//!   3. 立即显示 loading 页面，后台探测 /api/health，就绪后再加载前端
+//!      —— 启动等待不阻塞 UI；失败时在 loading 页给出提示，而不是白等
 //!   4. 托盘图标（右键菜单：打开 / 隐藏 / 退出）
 //!   5. 全局快捷键（Cmd+Shift+C 唤起/隐藏窗口）
-//!   6. 应用退出时 kill sidecar 子进程
+//!   6. 应用退出时终止后端子进程（避免退出后残留后台服务）
+//!   7. 启动成功后看护后端：进程崩溃会自动回到启动页并重启
 
-use std::net::TcpListener;
-use std::process::{Child, Command as StdCommand, Stdio};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime,
+    AppHandle, Manager, RunEvent, Runtime,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-use tauri_plugin_shell::ShellExt;
 use url::Url;
 
-/// 全局状态：保存 sidecar 子进程 handle
-#[allow(dead_code)]
+/// 后端可执行文件名（Windows 带 .exe）
+const BACKEND_BIN: &str = if cfg!(windows) {
+    "cizha-backend.exe"
+} else {
+    "cizha-backend"
+};
+
+/// 等待后端就绪的最长时间。
+/// 正常 onedir 启动 1~2 秒足够；留足余量覆盖首次启动的系统磁盘校验。
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 启动失败时的自动重试次数（上一次进程未退干净等偶发问题）
+const START_ATTEMPTS: u8 = 2;
+
+/// 全局状态：后端子进程 handle + 退出标记
 struct AppState {
-    port: Mutex<u16>,
     backend: Mutex<Option<Child>>,
+    /// 置位后看护线程立即停止，避免退出过程中又把后端拉起来
+    stopping: AtomicBool,
 }
 
 // 菜单项 ID（托盘菜单）
@@ -35,111 +54,78 @@ const MENU_SHOW: &str = "show";
 const MENU_HIDE: &str = "hide";
 const MENU_QUIT: &str = "quit";
 
-// 启动 loading 页面（蓝色渐变 + Logo + 加载中动画）
-const LOADING_HTML: &str = r#"
-(() => {
-  document.open();
-  document.write(`<!doctype html><html><head><meta charset="UTF-8"/>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      height: 100vh; width: 100vw;
-      background: linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%);
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
-      color: white;
-    }
-    .logo {
-      font-size: 120px; font-weight: 300; letter-spacing: -4px;
-      text-shadow: 0 4px 20px rgba(0,0,0,0.2);
-      margin-bottom: 32px;
-    }
-    .title { font-size: 20px; font-weight: 500; opacity: 0.9; }
-    .dots { display: flex; gap: 8px; margin-top: 24px; }
-    .dot {
-      width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.6);
-      animation: bounce 1.4s infinite ease-in-out both;
-    }
-    .dot:nth-child(1) { animation-delay: -0.32s; }
-    .dot:nth-child(2) { animation-delay: -0.16s; }
-    @keyframes bounce {
-      0%, 80%, 100% { transform: scale(0); }
-      40% { transform: scale(1); }
-    }
-  </style></head><body>
-  <div class="logo">C</div>
-  <div class="title">词札 · 加载中</div>
-  <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-  </body></html>`);
-  document.close();
-})();
-"#;
-
 fn main() {
+    // 先屏蔽退出信号，再创建任何线程：这样后续线程都继承屏蔽字，
+    // 信号只交给 spawn_signal_handler 里的 sigwait 线程处理。
+    #[cfg(unix)]
+    block_exit_signals();
+
     tauri::Builder::default()
+        // 单实例必须最先注册：第二次启动会把参数转给已有实例后自己退出，
+        // 避免出现两个托盘图标、两个后端同时读写同一个 SQLite。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            toggle_window(app, true);
+        }))
         // macOS 会自动提供默认菜单栏（词札 / 文件 / 编辑 / 视图 / 窗口 / 帮助）
         // 已包含 Cmd+Q 退出、Cmd+W 关闭、Cmd+M 最小化 等原生行为
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // macOS: show 窗口时强制激活（抢回焦点到最前，不管其他 App 是否在最前）
         .activate_ignoring_other_apps(true)
         .setup(|app| {
-            // 1. 探测可用端口（从 18765 开始，避免常见端口）
-            let port = find_free_port(18765).expect("找不到可用端口");
-            println!("🔌 分配端口: {}", port);
-
-            // 存入全局状态
             app.manage(AppState {
-                port: Mutex::new(port),
                 backend: Mutex::new(None),
+                stopping: AtomicBool::new(false),
             });
 
-            // 2. 创建主窗口 + 立即显示 loading（让用户看到进度，不等后端）
+            // 注销 / kill / Ctrl+C 不会触发 RunEvent::Exit，必须自己接管信号，
+            // 否则后端会变成孤儿进程继续占着端口。
+            #[cfg(unix)]
+            spawn_signal_handler(app.handle().clone());
+
+            // 1. 显示窗口。loading 页是 frontend/public/loading.html（窗口初始 URL），
+            //    由 WebView 正常加载，不依赖 eval 注入，不会再出现白屏或覆盖竞态。
             let main_window = app
                 .get_webview_window("main")
                 .ok_or("找不到 main 窗口")?;
+            // 窗口在配置里是 visible:false：等 loading 页画出首帧再显示，
+            // 否则 WebView 创建瞬间会闪一下白底（启动页是深蓝底）。
+            let show_window = main_window.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(200));
+                let _ = show_window.show();
+                let _ = show_window.set_focus();
+            });
 
-            // 先显示一个 loading 页面
-            main_window.show().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-            main_window.set_focus().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-            let _ = main_window.eval(LOADING_HTML);
+            // 2. 后台启动后端并等待就绪 → 加载前端。
+            //    setup 立即返回，loading 动画不被卡住；启动失败会重试一次，
+            //    两次都失败才在 loading 页给出可见的错误提示。
+            let app_handle = app.handle().clone();
+            let window = main_window.clone();
+            // 记住启动页地址：后端中途崩溃时用它回到「加载中」，再跳新端口
+            let loading_url = main_window.url().ok();
+            thread::spawn(move || {
+                match start_backend(&app_handle) {
+                    Ok(port) => {
+                        println!("✅ 后端就绪，监听 http://127.0.0.1:{port}");
+                        match Url::parse(&format!("http://127.0.0.1:{port}/")) {
+                            Ok(url) => navigate(&app_handle, &window, url),
+                            Err(e) => show_error_on_main(&app_handle, &window, &format!("地址解析失败：{e}")),
+                        }
+                        // 启动成功后开始看护：后端中途崩溃会自动重启
+                        if let Some(url) = loading_url {
+                            monitor_backend(app_handle.clone(), window.clone(), url);
+                        }
+                    }
+                    Err(message) => {
+                        eprintln!("❌ 后端启动失败: {message}");
+                        cleanup_backend(&app_handle);
+                        show_error_on_main(&app_handle, &window, &message);
+                    }
+                }
+            });
 
-            println!("🖥️  loading 窗口已显示");
-
-            // 3. spawn sidecar
-            let backend_child = spawn_backend_sidecar(app.handle(), port);
-
-            // 4. 等待后端就绪（去掉硬编码 1500ms sleep，端口 ready 就够了）
-            println!("⏳ 等待后端启动...");
-            if let Err(e) = wait_for_port(port, 15, Duration::from_millis(500)) {
-                eprintln!("❌ 后端启动失败: {}", e);
-                return Err(Box::new(e));
-            }
-            println!("✅ 后端就绪，监听 http://127.0.0.1:{}", port);
-
-            // 5. 保存 child handle 到状态
-            if let Some(state) = app.try_state::<AppState>() {
-                *state.backend.lock().unwrap() = backend_child;
-            }
-
-            // 6. 后端 ready → 正式加载前端（自动触发 activate_ignoring_other_apps）
-            let url = format!("http://127.0.0.1:{}/", port);
-            let parsed_url = Url::parse(&url)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-            main_window
-                .navigate(parsed_url)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-            // 再确保一次焦点（activate_ignoring_other_apps 已在 Builder 设了，
-            // show/set_focus 会自动带 ignoringOtherApps 行为）
-            let _ = main_window.set_focus();
-
-            println!("✅ 前端已加载，窗口在最前");
-
-            // 7. 创建托盘图标
+            // 3. 托盘 + 快捷键马上可用
             setup_tray(app.handle())?;
-
-            // 8. 注册全局快捷键 Cmd+Shift+C
             setup_shortcuts(app.handle())?;
 
             Ok(())
@@ -149,6 +135,7 @@ fn main() {
             MENU_SHOW => toggle_window(app, true),
             MENU_HIDE => toggle_window(app, false),
             MENU_QUIT => {
+                mark_stopping(app);
                 cleanup_backend(app);
                 app.exit(0);
             }
@@ -162,8 +149,155 @@ fn main() {
                 println!("📥 窗口已隐藏到托盘");
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // Cmd+Q / 托盘退出 / 系统注销都会走到这里：统一 kill 后端
+        .run(|app, event| match event {
+            RunEvent::Exit => {
+                mark_stopping(app);
+                cleanup_backend(app);
+            }
+            // macOS：窗口被关掉（隐藏到托盘）后再点 Dock 图标，要能重新显示
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => toggle_window(app, true),
+            _ => {}
+        });
+}
+
+/// 在 loading 页展示错误信息。
+/// 启动失败可能发生在页面还没加载完时，eval 会被丢弃，所以间隔重试几次。
+fn show_error_on_main<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+    message: &str,
+) {
+    let Ok(message_json) = serde_json::to_string(message) else {
+        return;
+    };
+    let script = format!("window.showStartupError && window.showStartupError({message_json});");
+
+    for attempt in 0..10 {
+        let window = window.clone();
+        let script = script.clone();
+        let _ = app.run_on_main_thread(move || {
+            let _ = window.eval(script);
+        });
+        if attempt < 9 {
+            thread::sleep(Duration::from_millis(200));
+        }
+    }
+}
+
+/// 启动后端并等待就绪，失败自动重试一次，返回最终可用的端口。
+/// 端口由系统分配（`--port 0`），后端启动后把实际端口写进 ready 文件，
+/// 彻底避免「先探测空端口再交给后端 bind」的竞态。
+fn start_backend<R: Runtime>(app: &AppHandle<R>) -> Result<u16, String> {
+    let mut last_error = String::from("未知错误");
+
+    for attempt in 1..=START_ATTEMPTS {
+        let ready_file = ready_file_path(attempt);
+        let _ = std::fs::remove_file(&ready_file);
+        println!("🔌 第 {attempt} 次启动（端口由系统分配）");
+
+        let Some(child) = spawn_backend(app, &ready_file) else {
+            return Err("找不到或无法启动本地服务程序（cizha-backend），请重新安装词札。".into());
+        };
+        if let Some(state) = app.try_state::<AppState>() {
+            *state.backend.lock().unwrap() = Some(child);
+        }
+
+        println!("⏳ 等待后端启动...");
+        match wait_for_backend(app, &ready_file) {
+            Ok(port) => {
+                let _ = std::fs::remove_file(&ready_file);
+                return Ok(port);
+            }
+            Err(message) => {
+                eprintln!("⚠️  第 {attempt} 次启动失败: {message}");
+                // 先杀掉失败进程，避免它继续占着端口影响重试
+                cleanup_backend(app);
+                last_error = message;
+            }
+        }
+    }
+
+    Err(last_error)
+}
+
+/// watchdog：启动成功后每 2 秒确认后端还活着，崩了就回启动页并自动重启
+fn monitor_backend<R: Runtime>(
+    app: AppHandle<R>,
+    window: tauri::WebviewWindow<R>,
+    loading_url: Url,
+) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(2));
+        if is_stopping(&app) {
+            break;
+        }
+        if !backend_exited(&app) {
+            continue;
+        }
+
+        eprintln!("⚠️  后端进程已退出，正在自动重启");
+        navigate(&app, &window, loading_url.clone());
+        match start_backend(&app) {
+            Ok(port) => {
+                println!("✅ 后端已重启，监听 http://127.0.0.1:{port}");
+                match Url::parse(&format!("http://127.0.0.1:{port}/")) {
+                    Ok(url) => navigate(&app, &window, url),
+                    Err(e) => show_error_on_main(&app, &window, &format!("地址解析失败：{e}")),
+                }
+            }
+            Err(message) => {
+                eprintln!("❌ 后端重启失败: {message}");
+                cleanup_backend(&app);
+                show_error_on_main(&app, &window, &message);
+                // 失败后放慢节奏，避免每 2 秒刷一次错误提示
+                thread::sleep(Duration::from_secs(20));
+            }
+        }
+    });
+}
+
+/// 在主线程导航；导航失败时把原因写回启动页，而不是静默停在 loading
+fn navigate<R: Runtime>(app: &AppHandle<R>, window: &tauri::WebviewWindow<R>, url: Url) {
+    let window = window.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Err(e) = window.navigate(url) {
+            let message = serde_json::to_string(&format!("页面加载失败：{e}")).unwrap_or_default();
+            let _ = window.eval(format!(
+                "window.showStartupError && window.showStartupError({message});"
+            ));
+        } else {
+            let _ = window.set_focus();
+        }
+    });
+}
+
+/// 退出流程开始后置位，看护线程看到就停
+fn mark_stopping<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.stopping.store(true, Ordering::Relaxed);
+    }
+}
+
+fn is_stopping<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.try_state::<AppState>()
+        .map(|state| state.stopping.load(Ordering::Relaxed))
+        .unwrap_or(true)
+}
+
+/// 每次启动用一个独立的 ready 文件，避免读到上一次的残留端口
+fn ready_file_path(attempt: u8) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "cizha-backend-{}-{attempt}-{nanos}.port",
+        std::process::id()
+    ))
 }
 
 /// 创建系统托盘（菜单 + 左键切换）
@@ -203,19 +337,13 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::
 /// 注册全局快捷键 Cmd+Shift+C（唤起/隐藏窗口）
 fn setup_shortcuts<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
     // Cmd+Shift+C: Modifiers::SUPER = Cmd on macOS
-    let shortcut = Shortcut::new(
-        Some(Modifiers::SUPER | Modifiers::SHIFT),
-        Code::KeyC,
-    );
+    let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC);
 
-    app.global_shortcut().on_shortcut(
-        shortcut,
-        |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                toggle_window(app, !is_window_visible(app));
-            }
-        },
-    )?;
+    app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            toggle_window(app, !is_window_visible(app));
+        }
+    })?;
 
     println!("⌨️  全局快捷键 Cmd+Shift+C 已注册");
     Ok(())
@@ -243,100 +371,263 @@ fn cleanup_backend<R: Runtime>(app: &AppHandle<R>) {
     if let Some(state) = app.try_state::<AppState>() {
         if let Ok(mut backend) = state.backend.lock() {
             if let Some(mut child) = backend.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-                println!("🧹 sidecar 已清理");
+                terminate_child(&mut child);
+                println!("🧹 后端进程已清理");
             }
         }
     }
 }
 
-// ========== 以下为原有辅助函数，未改 ==========
+/// 先 SIGTERM 让 uvicorn / SQLite 正常收尾，3 秒内没退出再 SIGKILL。
+/// 直接 kill 会跳过关闭流程，极端情况下可能丢最后一次写入。
+fn terminate_child(child: &mut Child) {
+    // 进程可能已被 try_wait 回收：此时 pid 可能被系统复用，绝不能再发信号
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
 
-/// spawn sidecar 二进制
-fn spawn_backend_sidecar(app_handle: &tauri::AppHandle, port: u16) -> Option<Child> {
-    let args = ["--host", "127.0.0.1", "--port", &port.to_string()];
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
 
-    // 方式 1：Tauri shell 插件
-    match app_handle.shell().sidecar("cizha-backend") {
-        Ok(sidecar) => match sidecar.args(args).spawn() {
-            Ok((_rx, _child)) => {
-                println!("🚀 sidecar 已启动（Tauri shell 方式）");
-                return None;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// 提前屏蔽退出信号（必须在任何线程创建之前调用）。
+/// 后续创建的线程都会继承该屏蔽字，信号只会被 sigwait 线程取走。
+#[cfg(unix)]
+fn block_exit_signals() {
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        libc::sigaddset(&mut set, libc::SIGINT);
+        libc::sigaddset(&mut set, libc::SIGHUP);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+}
+
+/// 专用线程等待退出信号：注销 / kill / Ctrl+C 时先清理后端再退出。
+/// 用 sigwait 而不是信号回调，是为了能安全地拿 Mutex 和调用 Tauri API。
+#[cfg(unix)]
+fn spawn_signal_handler<R: Runtime>(app: AppHandle<R>) {
+    thread::spawn(move || {
+        let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::sigemptyset(&mut set);
+            libc::sigaddset(&mut set, libc::SIGTERM);
+            libc::sigaddset(&mut set, libc::SIGINT);
+            libc::sigaddset(&mut set, libc::SIGHUP);
+        }
+
+        loop {
+            let mut sig: libc::c_int = 0;
+            if unsafe { libc::sigwait(&set, &mut sig) } != 0 {
+                break;
             }
-            Err(e) => {
-                eprintln!("⚠️  Tauri shell sidecar 失败: {}，尝试 fallback", e);
+            eprintln!("⚠️  收到退出信号 {sig}，清理后端进程后退出");
+            mark_stopping(&app);
+            cleanup_backend(&app);
+            app.exit(0);
+            break;
+        }
+    });
+}
+
+/// 后端日志路径：macOS = ~/Library/Logs/<bundle id>/backend.log
+fn backend_log_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let dir = app.path().app_log_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("backend.log"))
+}
+
+/// 打开后端日志（追加写，超过 5MB 轮转一份 .1）
+fn open_backend_log<R: Runtime>(app: &AppHandle<R>) -> Option<File> {
+    let path = backend_log_path(app)?;
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > 5 * 1024 * 1024 {
+            let _ = std::fs::rename(&path, path.with_extension("log.1"));
+        }
+    }
+    OpenOptions::new().create(true).append(true).open(&path).ok()
+}
+
+/// 解析后端可执行文件路径。
+///
+/// 打包后：Contents/Resources/backend/cizha-backend（onedir 目录，避免每次启动解压）
+/// 开发时：依次尝试 resources/ 副本和 PyInstaller 输出目录
+fn backend_executable<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("backend").join(BACKEND_BIN));
+    }
+
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    candidates.push(manifest.join("resources").join("backend").join(BACKEND_BIN));
+    candidates.push(
+        manifest
+            .join("..")
+            .join("dist")
+            .join("cizha-backend")
+            .join(BACKEND_BIN),
+    );
+    candidates.push(
+        manifest
+            .join("..")
+            .join("_pybuild")
+            .join("dist")
+            .join("cizha-backend")
+            .join(BACKEND_BIN),
+    );
+
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+/// spawn 后端进程：端口交给系统分配，启动完成后写入 ready 文件
+fn spawn_backend<R: Runtime>(app: &AppHandle<R>, ready_file: &Path) -> Option<Child> {
+    let path = match backend_executable(app) {
+        Some(path) => path,
+        None => {
+            eprintln!("❌ 找不到后端可执行文件（resource_dir / dist / _pybuild 都没有）");
+            return None;
+        }
+    };
+
+    let mut cmd = Command::new(&path);
+    cmd.args(["--host", "127.0.0.1", "--port", "0"])
+        .arg("--ready-file")
+        .arg(ready_file)
+        .stdin(Stdio::null());
+
+    // 输出落到日志文件：接 pipe 会因缓冲区写满把后端卡死，直接丢弃又没法排查。
+    match open_backend_log(app) {
+        Some(mut log) => {
+            let _ = writeln!(log, "\n===== 启动后端（端口由系统分配）=====");
+            match log.try_clone() {
+                Ok(err_log) => {
+                    cmd.stdout(Stdio::from(log));
+                    cmd.stderr(Stdio::from(err_log));
+                }
+                Err(_) => {
+                    cmd.stdout(Stdio::from(log));
+                    cmd.stderr(Stdio::null());
+                }
             }
-        },
+        }
+        None => {
+            cmd.stdout(Stdio::null());
+            cmd.stderr(Stdio::null());
+        }
+    }
+
+    // 子进程会继承父进程的信号屏蔽字。main 里屏蔽了 SIGTERM 等信号，
+    // 若不清空，后端就收不到 SIGTERM、永远无法优雅退出。
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            cmd.pre_exec(|| {
+                let mut empty: libc::sigset_t = std::mem::zeroed();
+                libc::sigemptyset(&mut empty);
+                libc::sigprocmask(libc::SIG_SETMASK, &empty, std::ptr::null_mut());
+                Ok(())
+            });
+        }
+    }
+
+    match cmd.spawn() {
+        Ok(child) => {
+            println!("🚀 后端已启动: {}", path.display());
+            Some(child)
+        }
         Err(e) => {
-            eprintln!("⚠️  sidecar() 失败: {}，尝试 fallback", e);
+            eprintln!("❌ 后端启动失败 {}: {}", path.display(), e);
+            None
         }
     }
-
-    // 方式 2：fallback —— 用 std::process::Command
-    let candidate_paths = [
-        "../_pybuild/dist/cizha-backend",
-        "_pybuild/dist/cizha-backend",
-        "binaries/cizha-backend",
-    ];
-
-    for path in &candidate_paths {
-        let mut cmd = StdCommand::new(path);
-        cmd.args(["--host", "127.0.0.1", "--port", &port.to_string()])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        match cmd.spawn() {
-            Ok(child) => {
-                println!("🚀 后端已启动（fallback 方式: {}）", path);
-                return Some(child);
-            }
-            Err(e) => {
-                eprintln!("  ❌ 路径 {} 启动失败: {}", path, e);
-                continue;
-            }
-        }
-    }
-
-    eprintln!("❌ 所有 sidecar 候选路径都尝试失败");
-    None
 }
 
-/// 探测可用端口：从 start_port 开始逐个 bind，返回第一个成功的
-fn find_free_port(start_port: u16) -> Result<u16, std::io::Error> {
-    for port in start_port..(start_port + 100) {
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return Ok(port);
+/// 等待后端真正可用：先从 ready 文件拿实际端口，再轮询 /api/health
+fn wait_for_backend<R: Runtime>(app: &AppHandle<R>, ready_file: &Path) -> Result<u16, String> {
+    let deadline = Instant::now() + READY_TIMEOUT;
+    let log_hint = backend_log_path(app)
+        .map(|path| format!("日志：{}", path.display()))
+        .unwrap_or_else(|| "日志文件创建失败".to_string());
+
+    loop {
+        if let Some(port) = read_ready_port(ready_file) {
+            if backend_health_ok(port) {
+                return Ok(port);
+            }
         }
+        if backend_exited(app) {
+            return Err(format!("本地服务进程已退出，具体原因见日志。{log_hint}"));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "本地服务在 {} 秒内没有启动。{log_hint}",
+                READY_TIMEOUT.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(150));
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AddrInUse,
-        "找不到可用端口",
-    ))
 }
 
-/// 等待指定端口变得可连接
-fn wait_for_port(
-    port: u16,
-    max_attempts: u32,
-    interval: Duration,
-) -> Result<(), std::io::Error> {
-    for attempt in 0..max_attempts {
-        match TcpListener::bind(("127.0.0.1", port)) {
-            Ok(_listener) => {
-                drop(_listener);
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-                return Ok(());
-            }
-            Err(e) => return Err(e),
-        }
-        if attempt < max_attempts - 1 {
-            thread::sleep(interval);
-        }
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::TimedOut,
-        format!("端口 {} 在 {} 次尝试内未就绪", port, max_attempts),
-    ))
+/// 读取后端回传的实际监听端口
+fn read_ready_port(path: &Path) -> Option<u16> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
 }
+
+/// 后端子进程是否已经退出
+fn backend_exited<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let Some(state) = app.try_state::<AppState>() else {
+        return true;
+    };
+    let Ok(mut backend) = state.backend.lock() else {
+        return false;
+    };
+    match backend.as_mut() {
+        Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+        None => true,
+    }
+}
+
+/// 通过 HTTP GET /api/health 判断服务是否已就绪
+fn backend_health_ok(port: u16) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(400)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
+    let request =
+        format!("GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 64];
+    match stream.read(&mut buf) {
+        Ok(n) if n > 8 => buf[..n].starts_with(b"HTTP/1.1 200"),
+        _ => false,
+    }
+}
+

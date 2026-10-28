@@ -63,35 +63,104 @@ jobs:
               --distpath ../dist \
               --clean
 
-      - name: 重命名产物（带平台后缀）
+      - name: 打包产物（onedir → tar.gz）
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME#refs/tags/}"
           SRC="dist/cizha-backend"
-          if [[ "${{ matrix.platform }}" == "windows-amd64" ]]; then
-              SRC="${SRC}.exe"
-          fi
-          if [[ ! -f "$SRC" ]]; then
+          if [[ ! -d "$SRC" ]]; then
               echo "❌ 产物不存在：$SRC"
               ls -la dist/ || true
               exit 1
           fi
-          DEST="dist/cizha-vocab-${TAG}-${{ matrix.platform }}"
-          [[ "${{ matrix.platform }}" == "windows-amd64" ]] && DEST="${DEST}.exe"
-          mv "$SRC" "$DEST"
+          DEST="dist/cizha-vocab-${TAG}-${{ matrix.platform }}.tar.gz"
+          tar -czf "$DEST" -C dist cizha-backend
           echo "✅ 产物就绪：$DEST"
           ls -la dist/
 
       - uses: actions/upload-artifact@v4
         with:
           name: cizha-backend-${{ matrix.platform }}
-          path: dist/*
+          path: dist/cizha-vocab-*.tar.gz
 
-  # -------- 汇总：等三条都完成后挂到 Release --------
+  # -------- macOS 桌面 App：.app + .dmg（未签名/未公证，安装时需右键打开）--------
+  build-desktop-macos:
+    name: 构建 macOS App
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装后端依赖 + PyInstaller
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.22.3
+
+      - name: 设置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 构建前端 dist
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: PyInstaller 打包后端
+        shell: bash
+        run: |
+          cd backend
+          python -m PyInstaller ../build/pyinstaller/cizha-backend.spec \
+              --noconfirm \
+              --workpath ../_pybuild \
+              --distpath ../dist \
+              --clean
+
+      - name: 准备后端资源（生成 manifest）
+        run: python3 scripts/prepare-sidecar.py
+
+      - name: 设置 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装 Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
+      # bundle.macOS.signingIdentity 未配置 → 走 ad-hoc 签名，Gatekeeper 仍会提示
+      - name: 构建 .app + .dmg
+        run: tauri build --bundles app,dmg
+
+      - name: 整理产物
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#refs/tags/}"
+          mkdir -p dist/release
+          cp src-tauri/target/release/bundle/dmg/*.dmg \
+             "dist/release/cizha-vocab-${TAG}-macos-arm64.dmg"
+          ls -lh dist/release/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cizha-desktop-macos
+          path: dist/release/*.dmg
+
+  # -------- 汇总：等各平台产物都完成后挂到 Release --------
   release:
     name: 创建 Release + 挂附件
     runs-on: ubuntu-latest
-    needs: build-binaries
+    needs: [build-binaries, build-desktop-macos]
     steps:
       - uses: actions/checkout@v4
 

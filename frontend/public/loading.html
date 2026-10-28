@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>词札 · 加载中</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: #fff; padding: 0 48px; text-align: center;
+    -webkit-user-select: none; user-select: none;
+  }
+  .logo { font-size: 120px; font-weight: 300; letter-spacing: -4px; margin-bottom: 32px; text-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+  .title { font-size: 20px; font-weight: 500; opacity: 0.9; }
+  .dots { display: flex; gap: 8px; margin-top: 24px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.6); animation: bounce 1.4s infinite ease-in-out both; }
+  .dot:nth-child(1) { animation-delay: -0.32s; }
+  .dot:nth-child(2) { animation-delay: -0.16s; }
+  .msg { display: none; font-size: 14px; line-height: 1.6; opacity: 0.85; max-width: 560px; }
+  .hint { display: none; font-size: 12px; line-height: 1.6; opacity: 0.7; margin-top: 22px; }
+  @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+  body.error .logo { font-size: 96px; margin-bottom: 24px; opacity: 0.9; }
+  body.error .title { font-size: 20px; font-weight: 600; margin-bottom: 14px; }
+  body.error .dots { display: none; }
+  body.error .msg, body.error .hint { display: block; }
+</style>
+</head>
+<body>
+  <div class="logo" id="logo">C</div>
+  <div class="title" id="title">词札 · 加载中</div>
+  <div class="msg" id="msg"></div>
+  <div class="dots" id="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+  <div class="hint" id="hint">请退出词札（Cmd+Q）后重新打开；若反复出现，请反馈这个问题。</div>
+  <script>
+    // Rust 端启动失败时调用，把 loading 页切换成错误提示
+    window.showStartupError = function (message) {
+      document.body.classList.add('error');
+      document.getElementById('logo').textContent = '!';
+      document.getElementById('title').textContent = '词札启动失败';
+      document.getElementById('msg').textContent = message || '本地服务启动失败。';
+    };
+  </script>
+</body>
+</html>

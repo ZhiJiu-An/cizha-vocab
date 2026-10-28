@@ -1,384 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="词札 — 面向 AI/LLM 从业者的英文术语记录本。词典与大模型双源查词、间隔重复复习、本地优先。">
-<title>词札 · 查得到 · 记得下 · 找得快</title>
-<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f5f4ef">
+<meta name="description" content="词札是面向 AI 与大模型从业者的英文术语记录本。双源查词、间隔复习、本地优先。">
+<title>词札 — 让专业词汇，真正成为自己的</title><link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #f8f9fc;
-    --surface: #ffffff;
-    --ink: #1e293b;
-    --ink-soft: #475569;
-    --ink-mute: #94a3b8;
-    --line: #e2e8f0;
-    --accent: #4f46e5;
-    --accent-soft: #6366f1;
-    --accent-bg: #eef2ff;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body {
-    font-family: Inter, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-    background: var(--bg);
-    color: var(--ink);
-    line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  /* ===== Nav ===== */
-  nav {
-    position: sticky; top: 0; z-index: 50;
-    background: rgba(248,249,252,0.85);
-    backdrop-filter: saturate(180%) blur(12px);
-    border-bottom: 1px solid var(--line);
-  }
-  .nav-inner {
-    max-width: 1080px; margin: 0 auto; padding: 14px 28px;
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  .logo {
-    font-weight: 700; font-size: 17px; color: var(--ink);
-    display: flex; align-items: center; gap: 8px;
-  }
-  .logo-dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent-soft));
-  }
-  .nav-links { display: flex; gap: 28px; font-size: 14.5px; }
-  .nav-links a { color: var(--ink-soft); text-decoration: none; transition: color .15s; }
-  .nav-links a:hover { color: var(--accent); }
-  .nav-cta {
-    padding: 7px 16px; border-radius: 8px; font-size: 14px;
-    background: var(--accent); color: #fff !important; text-decoration: none;
-    transition: background .15s;
-  }
-  .nav-cta:hover { background: var(--accent-soft); color: #fff !important; }
-
-  /* ===== Container ===== */
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
-
-  /* ===== Hero ===== */
-  .hero {
-    padding: 80px 0 64px;
-    display: grid; grid-template-columns: 1fr 1fr; gap: 56px;
-    align-items: center;
-  }
-  .hero-tag {
-    display: inline-block; padding: 4px 12px; border-radius: 20px;
-    background: var(--accent-bg); color: var(--accent);
-    font-size: 13px; font-weight: 500; margin-bottom: 18px;
-  }
-  .hero h1 {
-    font-size: 44px; font-weight: 700; line-height: 1.2;
-    letter-spacing: -0.5px; margin-bottom: 16px;
-  }
-  .hero h1 span { color: var(--accent); }
-  .hero-sub {
-    font-size: 17px; color: var(--ink-soft); margin-bottom: 32px;
-    max-width: 460px;
-  }
-  .hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 10px 22px; border-radius: 10px; font-size: 15px; font-weight: 500;
-    text-decoration: none; transition: all .15s;
-  }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: var(--accent-soft); }
-  .btn-ghost { border: 1px solid var(--line); color: var(--ink); }
-  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
-  .hero-meta {
-    margin-top: 24px; display: flex; gap: 20px; font-size: 13.5px; color: var(--ink-mute);
-  }
-  .hero-meta span::before { content: '·'; margin-right: 20px; color: var(--line); }
-  .hero-meta span:first-child::before { content: ''; margin-right: 0; }
-
-  .hero-visual {
-    position: relative;
-  }
-  .hero-shot {
-    width: 100%; border-radius: 14px; border: 1px solid var(--line);
-    box-shadow: 0 12px 40px -16px rgba(79,70,229,.25);
-    display: block;
-  }
-  .hero-shot-overlay {
-    position: absolute; bottom: -14px; right: -14px;
-    background: #fff; border: 1px solid var(--line); border-radius: 10px;
-    padding: 10px 14px; font-size: 13px; color: var(--ink-soft);
-    box-shadow: 0 8px 24px -12px rgba(0,0,0,.12);
-    display: flex; align-items: center; gap: 8px;
-  }
-  .dot-live { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
-
-  /* ===== Pain Point ===== */
-  .pain {
-    padding: 56px 0;
-    border-top: 1px solid var(--line);
-  }
-  .pain-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center;
-  }
-  .pain h2 { font-size: 28px; font-weight: 600; margin-bottom: 14px; letter-spacing: -0.3px; }
-  .pain p { color: var(--ink-soft); font-size: 15.5px; margin-bottom: 10px; }
-  .pain-quote {
-    margin-top: 18px; padding: 14px 18px;
-    background: var(--surface); border-left: 3px solid var(--accent);
-    border-radius: 0 8px 8px 0; font-size: 14.5px; color: var(--ink);
-    font-style: italic;
-  }
-  .pain-quote cite {
-    display: block; margin-top: 6px; font-size: 13px; color: var(--ink-mute);
-    font-style: normal;
-  }
-  .pain-shot {
-    width: 100%; border-radius: 12px; border: 1px solid var(--line);
-  }
-
-  /* ===== Features ===== */
-  .features { padding: 72px 0; }
-  .features-head { text-align: center; margin-bottom: 48px; }
-  .features-head h2 { font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
-  .features-head p { color: var(--ink-soft); margin-top: 10px; font-size: 15px; }
-  .feat-grid {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px;
-  }
-  .feat {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
-    padding: 28px; transition: transform .15s, box-shadow .15s;
-  }
-  .feat:hover { transform: translateY(-2px); box-shadow: 0 12px 32px -16px rgba(0,0,0,.12); }
-  .feat-icon {
-    width: 40px; height: 40px; border-radius: 10px; margin-bottom: 16px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--accent-bg); color: var(--accent); font-size: 20px;
-  }
-  .feat h3 { font-size: 16.5px; font-weight: 600; margin-bottom: 8px; }
-  .feat p { font-size: 14.5px; color: var(--ink-soft); line-height: 1.6; }
-
-  /* ===== Shots Grid ===== */
-  .shots { padding: 72px 0; border-top: 1px solid var(--line); }
-  .shots-head { text-align: center; margin-bottom: 40px; }
-  .shots-head h2 { font-size: 28px; font-weight: 600; letter-spacing: -0.3px; }
-  .shots-grid {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;
-  }
-  .shot-card {
-    border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
-    background: var(--surface);
-  }
-  .shot-card img { width: 100%; display: block; }
-  .shot-card-label {
-    padding: 12px 18px; font-size: 13.5px; color: var(--ink-soft);
-    border-top: 1px solid var(--line); background: var(--surface);
-  }
-
-  /* ===== Quick Start ===== */
-  .start { padding: 72px 0; border-top: 1px solid var(--line); }
-  .start-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: start;
-  }
-  .start h2 { font-size: 28px; font-weight: 600; margin-bottom: 14px; letter-spacing: -0.3px; }
-  .start p { color: var(--ink-soft); font-size: 15px; margin-bottom: 18px; }
-  .start ul { list-style: none; font-size: 14.5px; color: var(--ink-soft); }
-  .start li { padding: 4px 0 4px 18px; position: relative; }
-  .start li::before {
-    content: ''; position: absolute; left: 0; top: 12px;
-    width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
-  }
-  .code-block {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
-    overflow: hidden; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13.5px;
-  }
-  .code-bar {
-    padding: 8px 14px; background: #f1f5f9; border-bottom: 1px solid var(--line);
-    font-size: 12px; color: var(--ink-mute); display: flex; justify-content: space-between;
-  }
-  .code-content { padding: 18px 22px; }
-  .code-content .line { color: var(--ink); }
-  .code-content .cm { color: var(--ink-mute); }
-  .code-content .tag { color: var(--accent); }
-  .copy-btn {
-    cursor: pointer; font-size: 12px; color: var(--ink-mute); border: none; background: none;
-    padding: 2px 6px; border-radius: 4px;
-  }
-  .copy-btn:hover { color: var(--accent); background: var(--accent-bg); }
-
-  /* ===== Footer ===== */
-  footer {
-    padding: 48px 0 40px; border-top: 1px solid var(--line);
-    margin-top: 40px;
-  }
-  .foot-inner {
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 13.5px; color: var(--ink-mute);
-  }
-  .foot-inner a { color: var(--accent); text-decoration: none; }
-  .foot-inner a:hover { text-decoration: underline; }
-
-  /* ===== Responsive ===== */
-  @media (max-width: 760px) {
-    .hero { grid-template-columns: 1fr; padding: 56px 0 40px; gap: 40px; }
-    .hero h1 { font-size: 32px; }
-    .pain-grid, .start-grid { grid-template-columns: 1fr; gap: 32px; }
-    .feat-grid, .shots-grid { grid-template-columns: 1fr; }
-    .nav-links { display: none; }
-    .hero-shot-overlay { display: none; }
-  }
-</style>
-</head>
+:root{--paper:#f5f4ef;--white:#fffefa;--ink:#202821;--muted:#777e74;--line:#dedfd5;--green:#315d48;--lime:#c6db8d;--serif:'Noto Serif SC',Georgia,serif;--sans:'DM Sans','PingFang SC',sans-serif;--mono:'DM Mono',monospace;--max:1160px}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}a{color:inherit}button{font:inherit}.wrap{width:min(var(--max),calc(100% - 64px));margin:auto}.topbar{height:76px;position:sticky;top:0;z-index:20;border-bottom:1px solid transparent;transition:.3s;background:#f5f4efb8;backdrop-filter:blur(16px)}.topbar.scrolled{border-color:var(--line);background:#f5f4eff0}.nav{height:100%;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:17px;letter-spacing:.04em}.brand-mark{width:30px;height:30px;border-radius:10px;background:var(--green);color:#f8f5e9;display:grid;place-items:center;font-size:18px}.nav-links{display:flex;align-items:center;gap:34px}.nav-links a{text-decoration:none;color:#687168;font-size:13px;transition:color .2s}.nav-links a:hover,.nav-links a.active{color:var(--green)}.nav-cta,.button{border:0;border-radius:999px;padding:12px 19px;background:var(--green);color:white;text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:12px;transition:transform .25s,background .25s,box-shadow .25s;cursor:pointer}.nav-cta:hover,.button:hover{background:#234634;transform:translateY(-2px);box-shadow:0 9px 24px #315d482c}.menu-toggle{display:none;border:0;background:none;font-size:22px;color:var(--ink)}
+.hero{min-height:650px;padding:77px 0 82px;display:grid;grid-template-columns:.92fr 1.08fr;gap:64px;align-items:center}.overline{font:11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--green);display:flex;align-items:center;gap:10px}.overline:before{content:'';width:26px;height:1px;background:var(--green)}h1,h2,h3,p{margin-top:0}.hero h1{font:500 clamp(44px,5.6vw,70px)/1.19 var(--serif);letter-spacing:-.055em;margin:24px 0 20px}.hero h1 em{color:var(--green);font-style:normal;position:relative;white-space:nowrap}.hero h1 em:after{content:'';height:8px;position:absolute;left:0;right:0;bottom:1px;background:var(--lime);opacity:.6;z-index:-1;border-radius:99px}.hero-copy{max-width:430px;color:#687168;font-size:15px;line-height:1.95}.hero-actions{display:flex;align-items:center;gap:22px;margin-top:30px}.text-link{text-decoration:none;font-size:13px;color:var(--green);display:inline-flex;gap:8px;align-items:center}.text-link span{transition:transform .2s}.text-link:hover span{transform:translateX(4px)}.hero-meta{display:flex;gap:18px;align-items:center;margin-top:45px;color:#83897e;font:10px var(--mono);letter-spacing:.04em}.hero-meta b{color:var(--green);font-weight:500}.hero-stage{position:relative;padding:25px 0 25px 25px}.hero-stage:before{content:'';position:absolute;inset:0 0 0 12%;border-radius:48% 42% 46% 38%;background:#e7e9dc;transform:rotate(-5deg)}.shot-frame{position:relative;z-index:1;background:#fff;border:1px solid #d7d9cf;border-radius:13px;padding:9px;box-shadow:0 25px 70px #253d2b20;transform:rotate(1.2deg);transition:transform .6s}.shot-frame:hover{transform:rotate(0) translateY(-5px)}.shot-frame img{display:block;width:100%;border-radius:6px;cursor:zoom-in}.float-note{position:absolute;z-index:2;left:-10px;bottom:4px;background:var(--white);padding:14px 17px;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px #23352718;font-size:12px}.float-note small{display:block;font:9px var(--mono);color:var(--muted);margin-bottom:5px;letter-spacing:.1em}.float-note b{font:500 15px var(--serif)}.float-dot{position:absolute;z-index:2;right:-8px;top:3px;width:58px;height:58px;border-radius:50%;background:var(--lime);display:grid;place-items:center;color:var(--green);font-size:23px;animation:drift 5s ease-in-out infinite}
+.ticker{border-top:1px solid var(--line);border-bottom:1px solid var(--line);overflow:hidden}.ticker-track{display:flex;justify-content:space-around;gap:45px;padding:18px 0;white-space:nowrap;color:#788174;font:10px var(--mono);letter-spacing:.1em}.ticker span:before{content:'✳';color:var(--green);margin-right:12px}.section{padding:112px 0}.section-head{display:flex;justify-content:space-between;align-items:end;margin-bottom:42px}.section-head h2{font:500 clamp(30px,4vw,46px)/1.3 var(--serif);letter-spacing:-.04em;margin:12px 0 0}.section-head p{max-width:310px;color:var(--muted);font-size:13px;line-height:1.8;margin:0}.story{display:grid;grid-template-columns:.8fr 1.2fr;gap:80px;align-items:center}.story-quote{font:500 26px/1.75 var(--serif);letter-spacing:-.03em}.story-quote strong{color:var(--green);font-weight:500}.story-copy{color:var(--muted);font-size:14px;line-height:2}.story-card{position:relative;border:1px solid var(--line);background:var(--white);border-radius:18px;padding:38px 42px;overflow:hidden}.story-card:after{content:'token';position:absolute;right:-2px;bottom:-52px;font:500 145px var(--serif);color:#edf0e6;z-index:0;pointer-events:none}.story-card>*{position:relative;z-index:1}.story-kicker{font:10px var(--mono);letter-spacing:.12em;color:var(--muted)}.story-word{font:500 34px var(--serif);margin:17px 0}.story-meaning{font-size:15px;color:var(--green);font-weight:600}.story-desc{max-width:430px;color:#697168;font-size:13px;line-height:1.9;margin:12px 0 0}
+.features{background:#e9ebe1}.feature-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.feature{min-height:250px;padding:25px 22px;background:#fffefaad;border:1px solid #d9ddd2;border-radius:14px;transition:transform .3s,background .3s,box-shadow .3s}.feature:hover{transform:translateY(-7px);background:var(--white);box-shadow:0 18px 40px #27392b12}.feature-no{font:10px var(--mono);color:#9da498}.feature-icon{margin:35px 0 16px;width:35px;height:35px;border-radius:11px;background:#e5ebdb;display:grid;place-items:center;color:var(--green);font-size:17px}.feature h3{font:500 16px var(--serif);margin-bottom:8px}.feature p{font-size:11px;color:var(--muted);line-height:1.8;margin:0}
+.showcase{padding-bottom:120px}.showcase-top{display:flex;justify-content:space-between;align-items:end;margin-bottom:25px}.showcase-tabs{display:flex;gap:5px;padding:5px;border:1px solid var(--line);border-radius:999px;background:#efeee8}.tab{border:0;border-radius:999px;background:transparent;padding:9px 16px;color:var(--muted);font-size:12px;cursor:pointer;transition:.2s}.tab.active{background:var(--green);color:white;box-shadow:0 3px 10px #315d4825}.showcase-view{position:relative;background:#e8e9df;border:1px solid #d8dace;border-radius:17px;padding:17px;overflow:hidden}.showcase-view img{display:block;width:100%;height:auto;border-radius:8px;box-shadow:0 15px 40px #1e30271a;cursor:zoom-in;animation:fade-in .35s ease}.showcase-caption{display:flex;justify-content:space-between;align-items:center;padding:15px 5px 2px;font-size:12px;color:#687168}.showcase-caption span:last-child{font:10px var(--mono);color:#8b9186}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.step{padding:26px 28px 30px 0;position:relative}.step+.step{padding-left:30px;border-left:1px solid var(--line)}.step-no{font:10px var(--mono);color:var(--green)}.step h3{font:500 20px var(--serif);margin:21px 0 7px}.step p{color:var(--muted);font-size:12px;line-height:1.8;margin:0;max-width:260px}.install{background:var(--green);color:#f6f5ed;border-radius:18px;padding:48px;display:grid;grid-template-columns:1fr 1.05fr;gap:60px;align-items:center;position:relative;overflow:hidden}.install:after{content:'詞';position:absolute;right:40%;top:-105px;font:400 300px var(--serif);color:#ffffff08;pointer-events:none}.install .overline{color:#c9d9b2}.install .overline:before{background:#c9d9b2}.install h2{font:500 35px/1.4 var(--serif);margin:15px 0}.install p{font-size:12px;color:#d0dacf;line-height:1.9;max-width:350px;margin:0}.terminal{position:relative;z-index:1;border:1px solid #ffffff33;background:#183e2d;border-radius:11px;overflow:hidden;font:11px/2 var(--mono)}.terminal-bar{display:flex;justify-content:space-between;padding:9px 15px;border-bottom:1px solid #ffffff22;color:#b8c7b9;font-size:9px}.copy{border:0;background:transparent;color:#d7e5ce;cursor:pointer;font:10px var(--mono)}.copy:hover{color:white}.terminal pre{padding:13px 16px;margin:0;white-space:pre-wrap;color:#e8eee1}.terminal .comment{color:#95ad8e}footer{padding:30px 0 42px}.footer-inner{display:flex;justify-content:space-between;gap:20px;align-items:center;border-top:1px solid var(--line);padding-top:22px;color:#81877d;font-size:11px}.footer-links{display:flex;gap:19px}.footer-links a{text-decoration:none}.footer-links a:hover{color:var(--green)}.reveal{opacity:0;transform:translateY(22px);transition:opacity .7s,transform .7s}.reveal.visible{opacity:1;transform:none}.lightbox{position:fixed;inset:0;z-index:50;background:#121a16e8;display:grid;place-items:center;padding:30px;opacity:0;pointer-events:none;transition:opacity .25s;cursor:zoom-out}.lightbox.open{opacity:1;pointer-events:auto}.lightbox img{max-width:min(1200px,96vw);max-height:88vh;border-radius:8px;box-shadow:0 25px 90px #0008}.lightbox-close{position:absolute;right:25px;top:20px;color:white;background:none;border:0;font-size:28px;cursor:pointer}.lightbox-hint{position:absolute;bottom:20px;color:#ffffffaa;font:10px var(--mono)}@keyframes drift{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-8px) rotate(8deg)}}@keyframes fade-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media(max-width:900px){.hero{gap:35px;min-height:570px}.feature-grid{grid-template-columns:repeat(2,1fr)}.story{gap:35px}.section{padding:85px 0}.install{gap:30px;padding:38px}.nav-links{gap:19px}}@media(max-width:650px){.wrap{width:calc(100% - 38px)}.topbar{height:64px}.menu-toggle{display:block}.nav-cta{padding:10px 14px;font-size:11px;margin-left:auto;margin-right:12px}.nav-links{display:none;position:absolute;top:63px;left:0;right:0;background:var(--paper);padding:18px 22px 22px;border-bottom:1px solid var(--line);flex-direction:column;align-items:flex-start;gap:18px}.nav-links.open{display:flex}.hero{padding:56px 0;grid-template-columns:1fr;gap:32px;min-height:0}.hero h1{font-size:50px;margin:19px 0}.hero-copy{font-size:13px}.hero-meta{margin-top:30px}.hero-stage{padding:15px 0 15px 15px;margin:0 5px}.float-note{left:-5px;bottom:-4px}.float-dot{right:-6px;width:46px;height:46px}.ticker-track{justify-content:flex-start;gap:30px}.section{padding:75px 0}.section-head{display:block}.section-head p{margin-top:13px}.story{grid-template-columns:1fr;gap:22px}.story-quote{font-size:23px}.story-card{padding:28px}.story-card:after{font-size:110px}.feature-grid{grid-template-columns:1fr 1fr;gap:8px}.feature{padding:18px 15px;min-height:225px}.feature-icon{margin-top:27px}.showcase-top{display:block}.showcase-tabs{width:max-content;max-width:100%;margin-top:22px}.tab{padding:8px 12px;font-size:11px}.showcase-view{padding:9px}.showcase-caption{font-size:10px}.steps{grid-template-columns:1fr}.step,.step+.step{padding:21px 0;border-left:0}.step+.step{border-top:1px solid var(--line)}.step h3{margin:10px 0 4px}.install{grid-template-columns:1fr;padding:29px 22px;gap:23px}.install h2{font-size:28px}.install:after{right:-30px;top:30px;font-size:180px}.terminal{font-size:9px}.footer-inner{align-items:flex-start;flex-direction:column}.lightbox{padding:14px}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}.reveal{opacity:1;transform:none}}
+</style></head>
 <body>
+<header class="topbar" id="topbar"><nav class="nav wrap" aria-label="主导航"><a class="brand" href="#home"><span class="brand-mark">✳</span>词札</a><button class="menu-toggle" id="menuToggle" aria-label="打开导航" aria-expanded="false">☰</button><div class="nav-links" id="navLinks"><a href="#story">为什么词札</a><a href="#features">功能</a><a href="#showcase">产品界面</a><a href="#start">快速开始</a></div><a class="nav-cta" href="https://github.com/ZhiJiu-An/cizha-vocab">探索项目 <span>↗</span></a></nav></header>
+<main>
+<section class="hero wrap" id="home"><div class="reveal visible"><div class="overline">A VOCABULARY GARDEN · 词汇生长计划</div><h1>遇见一个词，<br>多懂它<em>一点。</em></h1><p class="hero-copy">读 AI 论文、技术文档时遇见的陌生术语，值得被好好理解、认真记下，最后变成你自己的知识。</p><div class="hero-actions"><a class="button" href="https://github.com/ZhiJiu-An/cizha-vocab">开始探索 <span>↗</span></a><a class="text-link" href="#showcase">看看它如何工作 <span>↓</span></a></div><div class="hero-meta"><b>开源 · 本地优先</b><span>FASTAPI + VUE 3</span><span>APACHE 2.0</span></div></div><div class="hero-stage reveal visible"><div class="shot-frame"><img class="zoomable" src="assets/screenshots/dictionary.png" alt="词札双栏词典查询界面"></div><div class="float-note"><small>WORD OF THE MOMENT</small><b>token <span style="color:#82917f">/ˈtoʊkən/</span></b></div><div class="float-dot">✳</div></div></section>
+<div class="ticker" aria-hidden="true"><div class="ticker-track"><span>查词 · LOOK UP</span><span>理解 · MAKE SENSE</span><span>收藏 · KEEP CLOSE</span><span>复习 · REMEMBER</span><span>查词 · LOOK UP</span></div></div>
+<section class="section wrap" id="story"><div class="story reveal"><div><div class="overline">THE MOMENT OF UNDERSTANDING</div><h2 class="story-quote">认识一个词，<br>和<strong>真正理解它</strong>，<br>是两回事。</h2><p class="story-copy">通用词典可以告诉你 token 是「代币」或「凭证」。但在大模型里，它是文本被拆解、计算与生成的基本单位。词札把词典释义与领域语境放在一起，让每次查词都更接近真正的理解。</p></div><div class="story-card"><div class="story-kicker">A TERM, IN CONTEXT / 01</div><div class="story-word">token</div><div class="story-meaning">词元 · 大模型处理文本的最小单位</div><p class="story-desc">模型将输入文本切分为 token，再把它们映射为数字序列。一个 token 可能是一个字、词的一部分，或一个标点符号。</p></div></div></section>
+<section class="section features" id="features"><div class="wrap"><div class="section-head reveal"><div><div class="overline">SMALL STEPS, LASTING KNOWLEDGE</div><h2>从好奇，到记得。</h2></div><p>把发现新词的瞬间，接成一条自然、轻松的学习路径。</p></div><div class="feature-grid"><article class="feature reveal"><div class="feature-no">01 / LOOK UP</div><div class="feature-icon">⌕</div><h3>双源查词</h3><p>词典释义与大模型领域解读并排呈现，通用含义和专业语境一眼对照。</p></article><article class="feature reveal"><div class="feature-no">02 / COLLECT</div><div class="feature-icon">＋</div><h3>随手收藏</h3><p>把释义、例句和个人笔记收进自己的词库，标签帮你随时找回来。</p></article><article class="feature reveal"><div class="feature-no">03 / REMEMBER</div><div class="feature-icon">↻</div><h3>间隔复习</h3><p>卡片翻面与三档自评，让恰好的复习节奏替你把新词留在记忆里。</p></article><article class="feature reveal"><div class="feature-no">04 / YOUR SPACE</div><div class="feature-icon">⌂</div><h3>本地优先</h3><p>词库保存在自己的设备上。无需账号，数据可导出，备份就是一个文件。</p></article></div></div></section>
+<section class="section wrap showcase" id="showcase"><div class="showcase-top reveal"><div><div class="overline">A CLOSER LOOK</div><h2 style="font:500 clamp(30px,4vw,46px)/1.3 var(--serif);letter-spacing:-.04em;margin:12px 0 0">学习的每一步，都有回响。</h2></div><div class="showcase-tabs" role="tablist" aria-label="选择产品界面"><button class="tab active" role="tab" aria-selected="true" data-image="dictionary.png" data-title="词典 · 双源查询">词典</button><button class="tab" role="tab" aria-selected="false" data-image="words.png" data-title="词库 · 个人收藏">词库</button><button class="tab" role="tab" aria-selected="false" data-image="review.png" data-title="复习 · 间隔记忆">复习</button><button class="tab" role="tab" aria-selected="false" data-image="stats.png" data-title="统计 · 学习轨迹">统计</button></div></div><div class="showcase-view reveal"><img id="showcaseImage" class="zoomable" src="assets/screenshots/dictionary.png" alt="词札词典界面"><div class="showcase-caption"><span id="showcaseTitle">词典 · 双源查询</span><span>点击图片放大 ↗</span></div></div></section>
+<section class="section wrap" style="padding-top:0"><div class="section-head reveal"><div><div class="overline">YOUR LEARNING LOOP</div><h2>三个动作，慢慢积累。</h2></div></div><div class="steps reveal"><article class="step"><div class="step-no">STEP 01</div><h3>遇见新词</h3><p>搜索单词、短语，或从截图中提取术语。</p></article><article class="step"><div class="step-no">STEP 02</div><h3>建立理解</h3><p>比较词典与领域解释，收藏有用的内容。</p></article><article class="step"><div class="step-no">STEP 03</div><h3>留在记忆里</h3><p>按间隔复习，在统计中看见自己的积累。</p></article></div></section>
+<section class="wrap" id="start"><div class="install reveal"><div><div class="overline">READY WHEN YOU ARE</div><h2>在自己的电脑上，<br>开始一场词汇漫游。</h2><p>需要 Python 3.10+ 和 Node.js 20.19+。词典无需 API Key；如需领域解读，可接入 OpenAI 兼容模型。</p></div><div class="terminal"><div class="terminal-bar"><span>⌘ &nbsp; TERMINAL</span><button class="copy" id="copyButton">复制命令 ↗</button></div><pre><span class="comment"># 克隆项目</span>
+git clone https://github.com/ZhiJiu-An/cizha-vocab.git
+cd cizha-vocab
 
-<nav>
-  <div class="nav-inner">
-    <div class="logo"><span class="logo-dot"></span>词札</div>
-    <div class="nav-links">
-      <a href="#features">功能</a>
-      <a href="#screenshots">界面</a>
-      <a href="#start">快速开始</a>
-      <a href="https://github.com/ZhiJiu-An/cizha-vocab/blob/main/README.md">文档</a>
-    </div>
-    <a class="nav-cta" href="https://github.com/ZhiJiu-An/cizha-vocab">GitHub →</a>
-  </div>
-</nav>
-
-<section class="wrap hero">
-  <div>
-    <div class="hero-tag">本地优先 · 开源 · Apache 2.0</div>
-    <h1>查得到 · <span>记得下</span> · 找得快</h1>
-    <p class="hero-sub">面向 AI / 大模型从业者的英文术语记录本。词典和大模型左右对照，查完一键收藏，按间隔提醒复习。</p>
-    <div class="hero-ctas">
-      <a class="btn btn-primary" href="https://github.com/ZhiJiu-An/cizha-vocab">在 GitHub 查看</a>
-      <a class="btn btn-ghost" href="https://github.com/ZhiJiu-An/cizha-vocab/releases/latest">下载 Release</a>
-    </div>
-    <div class="hero-meta">
-      <span>v0.1.1 最新</span>
-      <span>FastAPI + Vue 3 + SQLite</span>
-    </div>
-  </div>
-  <div class="hero-visual">
-    <img class="hero-shot" src="assets/screenshots/dictionary.png" alt="词典双栏查询">
-    <div class="hero-shot-overlay"><span class="dot-live"></span>左词典 · 右大模型</div>
-  </div>
-</section>
-
-<section class="pain wrap">
-  <div class="pain-grid">
-    <div>
-      <h2>同一词，两世界</h2>
-      <p>读英文技术文档时，最烦的不是生词，是"认识的词在专业语境里完全不是那个意思"。</p>
-      <p>比如 <code>token</code>，词典给的是"代币；象征；凭证"，而你真正需要的是——</p>
-      <div class="pain-quote">
-        词元，大模型处理文本的最小单位。
-        <cite>—— 大模型领域解读</cite>
-      </div>
-      <p style="margin-top:14px">通用词典不会问你"在哪个领域"。所以我写了这个小工具，把两个答案放在同一页。</p>
-    </div>
-    <div>
-      <img class="pain-shot" src="assets/screenshots/dictionary.png" alt="双栏对照">
-    </div>
-  </div>
-</section>
-
-<section class="features wrap" id="features">
-  <div class="features-head">
-    <h2>四个动作，一条路径</h2>
-    <p>查词 → 对照 → 收藏 → 复习，没有额外环节</p>
-  </div>
-  <div class="feat-grid">
-    <div class="feat">
-      <div class="feat-icon">📖</div>
-      <h3>词典 × 大模型 双源查词</h3>
-      <p>左栏音标、通用释义、双语例句；右栏按领域五段解读——中文定名、缩写全称、领域详解、领域例句、译文。流式返回，不用等整段。</p>
-    </div>
-    <div class="feat">
-      <div class="feat-icon">🔁</div>
-      <h3>间隔重复 三档自评</h3>
-      <p>1 / 2 / 4 / 7 / 15 / 30 天六档间隔。翻开卡自评"记住 / 模糊 / 忘记"，记住了升一档，忘了回到第一天。简单到三秒算清楚。</p>
-    </div>
-    <div class="feat">
-      <div class="feat-icon">🖼️</div>
-      <h3>图片取词</h3>
-      <p>看 PDF 截图或论文插图时，Ctrl+V 直接粘进去，视觉模型识别图里的英文、提取候选术语、点一下回填搜索框。</p>
-    </div>
-    <div class="feat">
-      <div class="feat-icon">🏡</div>
-      <h3>本地优先</h3>
-      <p>FastAPI + SQLite，单端口托管前端。数据只在你自己机器上，不需要注册账号，不需要云同步。备份就是复制一个文件。</p>
-    </div>
-  </div>
-</section>
-
-<section class="shots wrap" id="screenshots">
-  <div class="shots-head">
-    <h2>界面一览</h2>
-  </div>
-  <div class="shots-grid">
-    <div class="shot-card">
-      <img src="assets/screenshots/dictionary.png" alt="词典">
-      <div class="shot-card-label">词典双栏查询</div>
-    </div>
-    <div class="shot-card">
-      <img src="assets/screenshots/review.png" alt="复习">
-      <div class="shot-card-label">3D 翻卡复习</div>
-    </div>
-    <div class="shot-card">
-      <img src="assets/screenshots/words.png" alt="词库">
-      <div class="shot-card-label">词库与标签</div>
-    </div>
-    <div class="shot-card">
-      <img src="assets/screenshots/stats.png" alt="统计">
-      <div class="shot-card-label">学习统计</div>
-    </div>
-  </div>
-</section>
-
-<section class="start wrap" id="start">
-  <div class="start-grid">
-    <div>
-      <h2>两行命令，开箱即用</h2>
-      <p>不需要 Docker，不需要数据库配置。下载下来，跑一遍安装脚本，填一个 API Key，启动。</p>
-      <ul>
-        <li>Python 3.10+ 和 Node 20.19+</li>
-        <li>词典部分不需要 API Key</li>
-        <li>大模型部分需要 OpenAI 兼容的 Key（自备）</li>
-        <li>Windows 用户双击 <code>.bat</code> 文件</li>
-      </ul>
-    </div>
-    <div class="code-block">
-      <div class="code-bar"><span>Terminal</span><button class="copy-btn" onclick="copyCode(this)">复制</button></div>
-      <pre class="code-content"><span class="cm"># 克隆仓库</span>
-<span class="line">git clone https://github.com/ZhiJiu-An/cizha-vocab.git</span>
-<span class="line">cd cizha-vocab</span>
-
-<span class="cm"># 安装依赖（首次运行）</span>
-<span class="line">./setup.sh</span>
-
-<span class="cm"># 启动（浏览器自动打开）</span>
-<span class="line">./start.sh</span></pre>
-    </div>
-  </div>
-</section>
-
-<footer class="wrap">
-  <div class="foot-inner">
-    <span>© 2026 词札 · Apache 2.0</span>
-    <span><a href="https://github.com/ZhiJiu-An/cizha-vocab">GitHub</a> · <a href="https://github.com/ZhiJiu-An/cizha-vocab/releases">Releases</a> · <a href="https://github.com/ZhiJiu-An/cizha-vocab/issues">Issue</a></span>
-  </div>
-</footer>
-
+<span class="comment"># 安装依赖并启动</span>
+./setup.sh
+./start.sh</pre></div></div></section>
+</main><footer class="wrap"><div class="footer-inner"><span>© 2026 词札 · 为好奇心留一点生长空间。</span><div class="footer-links"><a href="https://github.com/ZhiJiu-An/cizha-vocab/blob/main/README.md">项目文档</a><a href="https://github.com/ZhiJiu-An/cizha-vocab/releases">Releases</a><a href="https://github.com/ZhiJiu-An/cizha-vocab/issues">反馈问题</a></div></div></footer>
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="截图预览"><button class="lightbox-close" aria-label="关闭预览">×</button><img src="" alt=""><div class="lightbox-hint">点击任意位置或按 ESC 关闭</div></div>
 <script>
-  function copyCode(btn) {
-    const code = btn.closest('.code-block').querySelector('.code-content').innerText;
-    navigator.clipboard.writeText(code);
-    const orig = btn.textContent;
-    btn.textContent = '已复制';
-    setTimeout(() => btn.textContent = orig, 1500);
-  }
-</script>
+const topbar=document.getElementById('topbar'),menuToggle=document.getElementById('menuToggle'),navLinks=document.getElementById('navLinks');window.addEventListener('scroll',()=>topbar.classList.toggle('scrolled',window.scrollY>12),{passive:true});menuToggle.addEventListener('click',()=>{const open=navLinks.classList.toggle('open');menuToggle.setAttribute('aria-expanded',open);menuToggle.textContent=open?'×':'☰'});navLinks.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{navLinks.classList.remove('open');menuToggle.setAttribute('aria-expanded','false');menuToggle.textContent='☰'}));
+const sections=[...document.querySelectorAll('main section[id]')],links=[...navLinks.querySelectorAll('a')];const sectionObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting)links.forEach(link=>link.classList.toggle('active',link.hash===`#${entry.target.id}`))}),{rootMargin:'-35% 0px -55% 0px'});sections.forEach(section=>sectionObserver.observe(section));const revealObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){entry.target.classList.add('visible');revealObserver.unobserve(entry.target)}}),{threshold:.12});document.querySelectorAll('.reveal:not(.visible)').forEach(el=>revealObserver.observe(el));
+const tabs=[...document.querySelectorAll('.tab')],showcaseImage=document.getElementById('showcaseImage'),showcaseTitle=document.getElementById('showcaseTitle');tabs.forEach(tab=>tab.addEventListener('click',()=>{tabs.forEach(item=>{item.classList.toggle('active',item===tab);item.setAttribute('aria-selected',item===tab)});showcaseImage.src=`assets/screenshots/${tab.dataset.image}`;showcaseImage.alt=`词札${tab.dataset.title}界面`;showcaseTitle.textContent=tab.dataset.title}));
+const lightbox=document.getElementById('lightbox'),lightboxImage=lightbox.querySelector('img');document.querySelectorAll('.zoomable').forEach(img=>img.addEventListener('click',()=>{lightboxImage.src=img.src;lightboxImage.alt=img.alt;lightbox.classList.add('open');document.body.style.overflow='hidden'}));function closeLightbox(){lightbox.classList.remove('open');document.body.style.overflow=''}lightbox.addEventListener('click',closeLightbox);lightbox.querySelector('img').addEventListener('click',event=>event.stopPropagation());document.addEventListener('keydown',event=>{if(event.key==='Escape')closeLightbox()});
+const copyButton=document.getElementById('copyButton');copyButton.addEventListener('click',async()=>{const commands='git clone https://github.com/ZhiJiu-An/cizha-vocab.git\ncd cizha-vocab\n./setup.sh\n./start.sh';try{await navigator.clipboard.writeText(commands);copyButton.textContent='已复制 ✓'}catch{copyButton.textContent='请手动复制'}setTimeout(()=>copyButton.textContent='复制命令 ↗',1800)});
+</script></body></html>
 
-</body>
-</html>
+git diff --stat -- docs/index.html && git status --short

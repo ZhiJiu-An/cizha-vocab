@@ -24,11 +24,20 @@ dist/
 dist-ssr/
 *.local
 
+# ===== 桌面壳 =====
+src-tauri/binaries/
+# prepare-sidecar.py 复制进来的后端产物（onedir）
+src-tauri/resources/backend/
+src-tauri/resources/backend-manifest.json
+
 # ===== 系统 / 编辑器 =====
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
 .idea/
+.ruff_cache/
+.trae/
+.screenshots/
 
 # 日志
 *.log
@@ -40,15 +49,16 @@ repair.md
 suggestion.md
 docs/versions/
 docs/promo/
+docs/harmony/
 
 # PyInstaller 打包产物（build/pyinstaller/*.spec 保留提交）
 _pybuild/
 dist/
 backend/build/
 backend/*.spec
+# 手动指定 --workpath build 时产生的中间目录
+build/cizha-backend/
 
 # ===== Tauri 桌面壳层 =====
 src-tauri/target/
-src-tauri/binaries/
 src-tauri/gen/
-src-tauri/Cargo.lock

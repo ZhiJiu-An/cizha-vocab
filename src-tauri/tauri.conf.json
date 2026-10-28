@@ -3,13 +3,16 @@
   "productName": "词札",
   "version": "0.2.1",
   "identifier": "com.cizha.vocab",
+  "build": {
+    "frontendDist": "../frontend/dist"
+  },
   "app": {
     "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
         "title": "词札 - Cizha Vocab",
-        "url": "about:blank",
+        "url": "loading.html",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -18,7 +21,7 @@
         "fullscreen": false,
         "decorations": true,
         "center": true,
-        "visible": true
+        "visible": false
       }
     ],
     "security": {
@@ -40,7 +43,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/cizha-backend"],
+    "resources": {
+      "resources/backend": "backend"
+    },
     "category": "Productivity",
     "shortDescription": "面向技术从业者的术语 / 单词记录本",
     "longDescription": "词札是一款轻量级本地术语记录本，帮助技术从业者快速记录和查询日常遇到的专业词汇。",

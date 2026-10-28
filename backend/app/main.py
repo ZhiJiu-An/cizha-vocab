@@ -13,7 +13,7 @@ from .paths import get_data_dir, get_env_path
 from .routes import words, dictionary, translate, stats, ocr, review, llm_config
 
 # 版本号只在这里定义一次，/api/health 与根路径兜底都引用它
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.1"
 APP_NAME = "词札单词库"
 
 # 加载 .env（源码模式 = backend/.env；PyInstaller 模式 = ~/Library/Application Support/cizha/.env）
