@@ -7,16 +7,14 @@
       <stop offset="0" stop-color="#245e50"/><stop offset="1" stop-color="#123c35"/>
     </linearGradient>
   </defs>
-  <!-- 纸底（填满整个方形，无圆角）-->
-  <rect x="0" y="0" width="512" height="512" fill="url(#paper)"/>
-  <!-- 主卡片（放大到填满视觉） -->
-  <path d="M64 48h324c36 0 64 29 64 64v290H106c-36 0-64-29-64-64V48z" fill="url(#ink)"/>
-  <!-- 卡片下部叠加层 -->
-  <path d="M106 466c-36 0-64-29-64-64s29-64 64-64h346v128H106z" fill="#17483e"/>
-  <!-- 三条横线（文字行） -->
-  <path d="M110 110h230M110 178h180M110 246h120" fill="none" stroke="#f8edda" stroke-linecap="round" stroke-width="24"/>
-  <!-- 金色书签（放大） -->
-  <path d="M344 216l52 32v144l-52-32-52 32V248z" fill="#e8ad59" stroke="#f8edda" stroke-linejoin="round" stroke-width="10"/>
-  <!-- 书签顶小圆点 -->
-  <circle cx="392" cy="104" r="22" fill="#e8ad59"/>
+  <!-- macOS 图标采用圆角方形底板，四角透明 -->
+  <rect x="8" y="8" width="496" height="496" rx="108" fill="url(#paper)"/>
+  <!-- 主图形缩至 82%，在图标边缘留出呼吸空间 -->
+  <g transform="translate(46.08 46.08) scale(0.82)">
+    <path d="M64 48h324c36 0 64 29 64 64v290H106c-36 0-64-29-64-64V48z" fill="url(#ink)"/>
+    <path d="M106 466c-36 0-64-29-64-64s29-64 64-64h346v128H106z" fill="#17483e"/>
+    <path d="M110 110h230M110 178h180M110 246h120" fill="none" stroke="#f8edda" stroke-linecap="round" stroke-width="24"/>
+    <path d="M344 216l52 32v144l-52-32-52 32V248z" fill="#e8ad59" stroke="#f8edda" stroke-linejoin="round" stroke-width="10"/>
+    <circle cx="392" cy="104" r="22" fill="#e8ad59"/>
+  </g>
 </svg>
