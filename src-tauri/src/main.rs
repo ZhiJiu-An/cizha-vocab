@@ -30,13 +30,15 @@ struct AppState {
     backend: Mutex<Option<Child>>,
 }
 
-// 菜单项 ID
+// 菜单项 ID（托盘菜单）
 const MENU_SHOW: &str = "show";
 const MENU_HIDE: &str = "hide";
 const MENU_QUIT: &str = "quit";
 
 fn main() {
     tauri::Builder::default()
+        // macOS 会自动提供默认菜单栏（词札 / 文件 / 编辑 / 视图 / 窗口 / 帮助）
+        // 已包含 Cmd+Q 退出、Cmd+W 关闭、Cmd+M 最小化 等原生行为
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
