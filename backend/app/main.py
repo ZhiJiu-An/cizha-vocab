@@ -4,25 +4,23 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import os
+import sys
 
 from dotenv import load_dotenv
 
 from .database import engine, Base
+from .paths import get_data_dir, get_env_path
 from .routes import words, dictionary, translate, stats, ocr, review, llm_config
 
 # 版本号只在这里定义一次，/api/health 与根路径兜底都引用它
 APP_VERSION = "0.1.1"
 APP_NAME = "词札单词库"
 
-# 加载 backend/.env 中的环境变量（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 等）
-# PyInstaller 打包后 __file__ 指向临时解压目录，fallback 到可执行文件同级
-_env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
-if not os.path.isfile(_env_path):
-    _env_path = os.path.join(os.getcwd(), ".env")
-load_dotenv(_env_path)
+# 加载 .env（源码模式 = backend/.env；PyInstaller 模式 = ~/Library/Application Support/cizha/.env）
+load_dotenv(str(get_env_path()))
 
-# 确保 data 目录存在（SQLite 文件所在目录）
-os.makedirs(os.path.join(os.path.dirname(__file__), "..", "data"), exist_ok=True)
+# 确保 data 目录存在（SQLite + llm_config.json 都在这里）
+os.makedirs(str(get_data_dir()), exist_ok=True)
 
 # 自动建表（含 v0.5 新增的 review_logs 表）
 Base.metadata.create_all(bind=engine)
@@ -146,7 +144,24 @@ def health():
 # 前端构建产物存在时，由 FastAPI 直接托管 dist：
 # 用户只需要启动后端一个进程，访问 http://127.0.0.1:8000 即可。
 # 开发时仍可用 `npm run dev`（5173）配合后端热更新。
-FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+def _resolve_frontend_dist() -> Path:
+    """源码模式从项目根找 frontend/dist，PyInstaller 模式从 _MEIPASS 里找。"""
+    source_candidate = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if source_candidate.is_dir():
+        return source_candidate
+    frozen = getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
+    if frozen:
+        meipass = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        bundle_candidate = Path(meipass) / "frontend" / "dist"
+        if bundle_candidate.is_dir():
+            return bundle_candidate
+    # fallback：可执行文件同级
+    exe_candidate = Path(os.path.dirname(sys.executable)) / "frontend" / "dist"
+    if exe_candidate.is_dir():
+        return exe_candidate
+    return source_candidate
+
+FRONTEND_DIST = _resolve_frontend_dist()
 
 if FRONTEND_DIST.is_dir():
     assets_dir = FRONTEND_DIST / "assets"

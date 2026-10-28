@@ -4,8 +4,9 @@ import os
 import shutil
 import sys
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+from .paths import get_data_dir
+
+DATA_DIR = get_data_dir()
 
 DB_FILENAME = "cizha.db"
 LEGACY_DB_FILENAME = "danciji.db"   # v0.14 之前的文件名，用于一次性迁移

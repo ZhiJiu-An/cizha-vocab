@@ -41,8 +41,8 @@ suggestion.md
 docs/versions/
 docs/promo/
 
-# PyInstaller 打包产物（Phase 0）
-build/cizha-backend/
+# PyInstaller 打包产物（build/pyinstaller/*.spec 保留提交）
+_pybuild/
 dist/
 backend/build/
 backend/*.spec
