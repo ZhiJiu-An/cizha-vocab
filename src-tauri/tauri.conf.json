@@ -32,7 +32,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "deb", "appimage", "nsis", "msi"],
+    "targets": ["app", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -43,6 +43,17 @@
     "externalBin": ["binaries/cizha-backend"],
     "category": "Productivity",
     "shortDescription": "面向技术从业者的术语 / 单词记录本",
-    "longDescription": "词札是一款轻量级本地术语记录本，帮助技术从业者快速记录和查询日常遇到的专业词汇。"
+    "longDescription": "词札是一款轻量级本地术语记录本，帮助技术从业者快速记录和查询日常遇到的专业词汇。",
+    "copyright": "Copyright © 2026 ZhiJiu-An. All rights reserved.",
+    "macOS": {
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "12.0",
+      "dmg": {
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 },
+        "windowSize": { "width": 660, "height": 400 }
+      }
+    }
   }
 }
