@@ -15,7 +15,11 @@ APP_VERSION = "0.1.1"
 APP_NAME = "词札单词库"
 
 # 加载 backend/.env 中的环境变量（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 等）
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+# PyInstaller 打包后 __file__ 指向临时解压目录，fallback 到可执行文件同级
+_env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+if not os.path.isfile(_env_path):
+    _env_path = os.path.join(os.getcwd(), ".env")
+load_dotenv(_env_path)
 
 # 确保 data 目录存在（SQLite 文件所在目录）
 os.makedirs(os.path.join(os.path.dirname(__file__), "..", "data"), exist_ok=True)

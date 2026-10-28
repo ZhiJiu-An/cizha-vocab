@@ -39,3 +39,10 @@ PROJECT_AUDIT.md
 repair.md
 suggestion.md
 docs/versions/
+docs/promo/
+
+# PyInstaller 打包产物（Phase 0）
+build/cizha-backend/
+dist/
+backend/build/
+backend/*.spec
