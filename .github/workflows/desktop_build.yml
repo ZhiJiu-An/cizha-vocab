@@ -54,10 +54,10 @@ jobs:
 
       # Windows runner 命令行语法不同，用 shell: bash 统一
       - name: PyInstaller 打包
-        working-directory: backend
         shell: bash
         run: |
-          python -m PyInstaller build/pyinstaller/cizha-backend.spec \
+          cd backend
+          python -m PyInstaller ../build/pyinstaller/cizha-backend.spec \
               --noconfirm \
               --workpath ../_pybuild \
               --distpath ../dist \
