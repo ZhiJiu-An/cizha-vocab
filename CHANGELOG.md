@@ -7,11 +7,18 @@
 
 ### 新增
 
-- **Tauri 桌面壳层（Phase 3 进行中）**
-  - `src-tauri/`：Tauri 2 壳层目录（Cargo.toml + tauri.conf.json + build.rs + main.rs）
-  - `src-tauri/src/main.rs`：spawn PyInstaller sidecar → 探测可用端口 → 等待后端就绪 → 创建 WebView 窗口加载 `http://127.0.0.1:{port}/`
-  - `src-tauri/capabilities/default.json`：sidecar spawn 权限（`--host 127.0.0.1 --port <port>`）
-  - `scripts/prepare-sidecar.py`：把 PyInstaller 产物按 platform triple 重命名放到 `src-tauri/binaries/`
+- **Tauri 2 桌面壳层（Phase 3-4 ✅）**
+  - `src-tauri/`：完整 Tauri 2 桌面项目（壳层 + sidecar + 托盘 + 全局快捷键）
+  - `src-tauri/src/main.rs`：
+    - spawn PyInstaller sidecar → 探测可用端口 → 等待后端就绪 → WebView 加载前端
+    - 系统托盘（右键菜单：打开 / 隐藏 / 退出；左键切换窗口可见性）
+    - 全局快捷键 Cmd+Shift+C（唤起/隐藏窗口）
+    - CloseRequested → 隐藏到托盘（不退出），退出时 kill sidecar
+  - `src-tauri/capabilities/default.json`：sidecar spawn + global-shortcut 权限
+  - `src-tauri/icons/`：自动生成全套图标（icon.png / 32x32 / 128x128 / icon.ico / icon.icns）
+  - `scripts/prepare-sidecar.py`：PyInstaller 产物按 platform triple 重命名
+  - `scripts/generate-icons.py`：PIL 画图标 + iconutil 生成 icns
+  - `cargo tauri build` 产物：词札.app (34 MB) + 词札_0.2.1_aarch64.dmg (24 MB)
 
 - **多平台 PyInstaller CI（Phase 2 ✅）**
   - `.github/workflows/desktop_build.yml`：tag `v*` 时自动并发打 macOS arm64 / Linux amd64 / Windows amd64 三份 PyInstaller 二进制，挂 Release 附件
