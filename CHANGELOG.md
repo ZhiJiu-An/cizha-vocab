@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **桌面 App（预览）**：Phase 0 PyInstaller 可行性验证 → Phase 1 补完数据持久化 + 前端嵌入
+  - `backend/app/paths.py`：统一资源路径，首次启动把 SQLite / llm_config.json / .env 复制到用户目录（macOS `~/Library/Application Support/cizha/`、Windows `%APPDATA%/cizha/`、Linux `$XDG_DATA_HOME/cizha/`）
+  - `backend/run.py`：PyInstaller 入口脚本，替代 `uvicorn app.main:app` 命令行方式
+  - `build/pyinstaller/cizha-backend.spec`：打包配置，`collect_all app` 确保 FastAPI 路由隐式 import 全收
+  - `.github/workflows/desktop_build.yml`：tag `v*` 时自动并发打 macOS / Linux / Windows 三份 PyInstaller 二进制，挂 Release 附件
+
 ## [0.1.1] - 2026-10-22
 
 ### 修复
