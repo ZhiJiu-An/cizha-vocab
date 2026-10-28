@@ -7,10 +7,16 @@
       <stop offset="0" stop-color="#245e50"/><stop offset="1" stop-color="#123c35"/>
     </linearGradient>
   </defs>
-  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#paper)"/>
-  <path d="M100 92h228c29 0 52 23 52 52v235H154c-30 0-54-24-54-54V92z" fill="url(#ink)"/>
-  <path d="M154 379c-30 0-54-24-54-54s24-54 54-54h226v108H154z" fill="#17483e"/>
-  <path d="M156 146h151M156 199h117M156 252h78" fill="none" stroke="#f8edda" stroke-linecap="round" stroke-width="19"/>
-  <path d="M307 219l38 24v107l-38-24-38 24V243z" fill="#e8ad59" stroke="#f8edda" stroke-linejoin="round" stroke-width="8"/>
-  <circle cx="345" cy="145" r="15" fill="#e8ad59"/>
+  <!-- 纸底（填满整个方形，无圆角）-->
+  <rect x="0" y="0" width="512" height="512" fill="url(#paper)"/>
+  <!-- 主卡片（放大到填满视觉） -->
+  <path d="M64 48h324c36 0 64 29 64 64v290H106c-36 0-64-29-64-64V48z" fill="url(#ink)"/>
+  <!-- 卡片下部叠加层 -->
+  <path d="M106 466c-36 0-64-29-64-64s29-64 64-64h346v128H106z" fill="#17483e"/>
+  <!-- 三条横线（文字行） -->
+  <path d="M110 110h230M110 178h180M110 246h120" fill="none" stroke="#f8edda" stroke-linecap="round" stroke-width="24"/>
+  <!-- 金色书签（放大） -->
+  <path d="M344 216l52 32v144l-52-32-52 32V248z" fill="#e8ad59" stroke="#f8edda" stroke-linejoin="round" stroke-width="10"/>
+  <!-- 书签顶小圆点 -->
+  <circle cx="392" cy="104" r="22" fill="#e8ad59"/>
 </svg>
