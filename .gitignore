@@ -62,3 +62,11 @@ build/cizha-backend/
 # ===== Tauri 桌面壳层 =====
 src-tauri/target/
 src-tauri/gen/
+
+# ===== 内部开发文档（不公开）=====
+AGENTS.md
+ARCHITECTURE.md
+PRD.md
+MVP.md
+docs/desktop/
+docs/harmony/
