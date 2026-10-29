@@ -58,7 +58,7 @@
 
 **首次打开说明**：macOS 安全机制会弹出「无法打开 — 无法验证开发者」。右键词札 → 打开 → 再点打开即可，之后双击正常。
 
-详细说明见 [macOS 安装指南](docs/desktop/macOS-安装指南.md)。
+详细说明见 [macOS 安装指南](docs/macOS-安装指南.md)。
 
 ---
 
@@ -411,4 +411,3 @@ cd ../frontend && npm run build
 - [FastAPI](https://fastapi.tiangolo.com/) · [SQLAlchemy](https://www.sqlalchemy.org/) · [Vue](https://vuejs.org/) · [Vite](https://vite.dev/)
 - 词典数据来自 [有道词典](https://dict.youdao.com/)
 - 大模型能力通过任意 OpenAI 兼容接口接入
-- 界面灵感来自自然绿主题设计稿（`demo.html` / `demo-dict.html`）
