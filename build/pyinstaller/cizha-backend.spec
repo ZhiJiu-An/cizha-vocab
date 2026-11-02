@@ -39,17 +39,18 @@ def _data_dirs():
 
     规则：都从 PyInstaller 临时目录（_MEIPASS）作为源，paths.py 的
     get_data_dir() 在首次启动时自动复制到用户目录。
+
+    注意：绝对不能把 backend/data/ 打进产物。该目录含开发者真实的
+    cizha.db、danciji.db 与 llm_config.json（明文 API Key），一旦随 App
+    分发，所有下载者都会拿到这些数据。数据库与配置文件由应用首次启动时
+    自动创建，无需预置。
     """
     items = []
-    # 1. 数据库 + llm_config.json（首次从这里复制到用户目录）
-    data = os.path.join(backend_root, "data")
-    if os.path.isdir(data):
-        items.append((data, "data"))
-    # 2. 前端 dist（FastAPI 直接托管，不走用户目录复制）
+    # 1. 前端 dist（FastAPI 直接托管，不走用户目录复制）
     frontend_dist = os.path.join(project_root, "frontend", "dist")
     if os.path.isdir(frontend_dist):
         items.append((frontend_dist, "frontend/dist"))
-    # 3. .env.example（首次启动复制到用户目录的 .env）
+    # 2. .env.example（首次启动复制到用户目录的 .env，只含占位符）
     env_example = os.path.join(backend_root, ".env.example")
     if os.path.isfile(env_example):
         items.append((env_example, "."))

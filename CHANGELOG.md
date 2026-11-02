@@ -55,6 +55,7 @@
   - `backend/run.py`：PyInstaller 入口脚本，替代 `uvicorn app.main:app` 命令行方式
   - `build/pyinstaller/cizha-backend.spec`：打包配置，`collect_all app` 确保 FastAPI 路由隐式 import 全收
 
+
 ## [0.1.1] - 2026-10-22
 
 ### 修复

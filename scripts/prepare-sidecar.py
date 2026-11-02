@@ -19,6 +19,26 @@ import sys
 import time
 from pathlib import Path
 
+SENSITIVE_NAMES = {".env", "llm_config.json"}
+SENSITIVE_SUFFIXES = (".db", ".db-journal", ".db-wal", ".db-shm", ".sqlite", ".sqlite3")
+
+
+def sanitize_sensitive(root: Path) -> list[Path]:
+    """删除复制件里的真实密钥 / 数据库，避免随 App 分发。
+
+    PyInstaller spec 已不再收录 backend/data/，这里是第二道防线：
+    即使有人改回 spec、或用了旧的 dist 产物，也不会把开发者的 Key
+    和个人词库打进安装包。.env.example 是占位模板，保留。
+    """
+    removed: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name == ".env.example":
+            continue
+        if path.name in SENSITIVE_NAMES or path.name.endswith(SENSITIVE_SUFFIXES):
+            path.unlink()
+            removed.append(path.relative_to(root))
+    return removed
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="准备 Tauri 后端资源（onedir）")
@@ -52,6 +72,12 @@ def main() -> int:
         shutil.rmtree(dest_dir)
     dest_dir.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src_dir, dest_dir)
+
+    removed = sanitize_sensitive(dest_dir)
+    if removed:
+        print("⚠️  已从后端资源中移除敏感文件（不应随 App 分发）：")
+        for path in removed:
+            print(f"   - {path}")
 
     exe_path = dest_dir / exe_name
     if sys.platform != "win32":
