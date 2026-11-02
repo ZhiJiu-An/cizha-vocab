@@ -3,6 +3,14 @@
 本项目的所有重要变更记录在此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-11-02
+
+### 安全
+
+- **打包产物不再携带开发者数据**：PyInstaller 配置移除 `backend/data/`，`prepare-sidecar.py` 在复制后额外清洗 `.env`、`llm_config.json` 与 `*.db`，避免真实 API Key 和个人词库随 App 分发
+- **下架含真实数据的安装包**：v0.2.1 的 `cizha_0.2.1_aarch64.dmg` 内含开发者真实 API Key 与个人词库，已从 Release 删除并重新发布本版本
+- **公开仓库历史清理**：内部开发文档（`AGENTS.md`、`ARCHITECTURE.md`、`PRD.md`、`.trae/`、`docs/desktop/`）与其中的本机绝对路径已从 Git 历史中移除
+
 ## [Unreleased]
 
 ### 新增
@@ -94,6 +102,7 @@
 - `.env`、`backend/data/`（含用户配置与 API Key）不纳入版本控制
 - 历史提交中的作者邮箱统一为 GitHub noreply 地址
 
-[Unreleased]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.2.1...v0.2.2
 [0.1.1]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.1.0
