@@ -18,7 +18,7 @@
 <br>
 
 <a href="https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.3/cizha-vocab-v0.2.3-macos-arm64.dmg">
-  <strong>⬇️ 下载词札 for macOS Apple Silicon (.dmg · 42 MB)</strong>
+  <strong>⬇️ 下载词札 for macOS Apple Silicon (.dmg · 31 MB)</strong>
 </a>
 
 </div>
@@ -52,7 +52,7 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS Apple Silicon | [cizha-vocab-v0.2.3-macos-arm64.dmg](https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.3/cizha-vocab-v0.2.3-macos-arm64.dmg) | 约 42 MB · macOS 12.0+ |
+| macOS Apple Silicon | [cizha-vocab-v0.2.3-macos-arm64.dmg](https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.3/cizha-vocab-v0.2.3-macos-arm64.dmg) | 约 31 MB · macOS 12.0+ |
 | macOS Intel | 源码构建 | 见下方 [快速开始](#快速开始) |
 | PyInstaller 三平台二进制 | [Releases 页面](https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.2.3) | darwin-arm64 / linux-amd64 / windows-amd64 |
 
