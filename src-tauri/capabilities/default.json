@@ -3,9 +3,14 @@
   "identifier": "default",
   "description": "词札桌面 App 默认能力",
   "windows": ["main", "quick"],
+  "local": true,
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  },
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "cizha-ipc"
   ]
 }

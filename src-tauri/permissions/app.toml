@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "cizha-ipc"
+description = "允许词札前端调用应用内的 IPC 命令（快查浮窗与快捷键设置）。"
+commands.allow = [
+  "quick_get_pending",
+  "quick_hide",
+  "open_main_query",
+  "get_global_shortcuts",
+  "set_global_shortcut",
+  "reset_global_shortcuts",
+]
