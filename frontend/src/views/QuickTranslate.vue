@@ -33,6 +33,24 @@
         <span v-if="ocrLoading" class="q-shot-mask">识别中…</span>
       </div>
 
+      <!-- 词典释义：命中的词/短语才显示；未收录时不占位，只保留大模型翻译 -->
+      <div v-if="dictLoading || (dict && dict.found)" class="q-dict">
+        <div class="q-block-head">📖 词典释义</div>
+        <div v-if="dictLoading" class="q-dict-hint">查询词典中…</div>
+        <template v-else>
+          <div class="q-dict-word">
+            <b>{{ dict.word }}</b>
+            <span v-if="dict.phonetic_uk" class="q-phon">{{ dict.phonetic_uk }}</span>
+            <span v-if="dict.phonetic_us" class="q-phon">{{ dict.phonetic_us }}</span>
+          </div>
+          <div v-if="dict.api_meaning" class="q-dict-mean">{{ dict.api_meaning }}</div>
+          <div v-for="(ex, i) in dict.examples || []" :key="i" class="q-dict-ex">
+            {{ ex.en }}<span v-if="ex.zh" class="q-dict-zh">{{ ex.zh }}</span>
+          </div>
+        </template>
+      </div>
+      <div v-if="dictError" class="q-dict-hint err">词典暂不可用：{{ dictError }}</div>
+
       <!-- 领域翻译结果（只展示紧凑的三段，完整内容去主窗口看） -->
       <div v-if="visibleSections.length" class="q-result">
         <div v-for="sec in visibleSections" :key="sec.key" class="q-sec">
@@ -77,7 +95,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { extractWordsFromImage } from '../api'
+import { extractWordsFromImage, lookupDictionary } from '../api'
 import { prefs } from '../utils/prefs'
 import { effectiveInAppShortcuts, matchesCombo } from '../utils/shortcuts'
 
@@ -99,10 +117,15 @@ const ocrLoading = ref(false)
 const ocrTranslation = ref('')
 const ocrWords = ref([])
 
+const dict = ref(null)
+const dictLoading = ref(false)
+const dictError = ref('')
+
 const SECTION_META = { 定名: '中文定名', 展开: '缩写展开', 详解: '领域详解' }
 
 let lastPayloadId = 0
 let streamSeq = 0
+let dictSeq = 0
 let abortCtrl = null
 let unlisten = null
 
@@ -123,8 +146,30 @@ const isEmpty = computed(
     !visibleSections.value.length &&
     !ocrTranslation.value &&
     !ocrLoading.value &&
-    !loading.value,
+    !loading.value &&
+    !dictLoading.value &&
+    !(dict.value && dict.value.found),
 )
+
+/* ===== 词典释义（目标词/短语命中才展示） ===== */
+async function loadDictionary(word) {
+  const text = (word || '').trim()
+  const seq = ++dictSeq
+  dict.value = null
+  dictError.value = ''
+  dictLoading.value = Boolean(text)
+  if (!text) return
+  try {
+    const res = await lookupDictionary(text)
+    if (seq !== dictSeq) return
+    dict.value = res
+  } catch (e) {
+    if (seq !== dictSeq) return
+    dictError.value = e.message || '词典查询失败'
+  } finally {
+    if (seq === dictSeq) dictLoading.value = false
+  }
+}
 
 /* ===== 流式解析：与搜索页保持同一套五段格式 ===== */
 function parseSections(raw) {
@@ -151,6 +196,7 @@ async function doTranslate() {
   ocrTranslation.value = ''
   ocrWords.value = []
   imageUrl.value = ''
+  loadDictionary(word)
 
   abortCtrl?.abort()
   abortCtrl = new AbortController()
@@ -214,6 +260,10 @@ async function runOcr(dataUrl) {
   ocrLoading.value = true
   ocrTranslation.value = ''
   ocrWords.value = []
+  dictSeq++
+  dict.value = null
+  dictLoading.value = false
+  dictError.value = ''
   try {
     const blob = await (await fetch(dataUrl)).blob()
     const file = new File([blob], 'screenshot.png', { type: blob.type || 'image/png' })
@@ -221,6 +271,8 @@ async function runOcr(dataUrl) {
     ocrTranslation.value = res.translation || ''
     ocrWords.value = res.words || []
     currentWord.value = res.original_text || ''
+    // 词典能收录这段原文（词/短语）时给出原文证据，否则只保留大模型翻译
+    loadDictionary(currentWord.value)
     if (!ocrTranslation.value && !ocrWords.value.length) {
       error.value = '未识别到文字，换个区域再试'
     }
@@ -246,6 +298,10 @@ async function applyPayload(payload) {
   ocrWords.value = []
   imageUrl.value = ''
   currentWord.value = ''
+  dictSeq++
+  dict.value = null
+  dictLoading.value = false
+  dictError.value = ''
   loading.value = false
   streaming.value = false
 
@@ -302,6 +358,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   unlisten?.()
   abortCtrl?.abort()
+  dictSeq++
 })
 </script>
 
@@ -415,6 +472,38 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--primary);
 }
+
+.q-dict {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.q-block-head {
+  font-size: 11px;
+  color: var(--primary);
+  letter-spacing: 0.5px;
+}
+.q-dict-hint { font-size: 12px; color: var(--muted); }
+.q-dict-hint.err { color: #b3541e; }
+.q-dict-word { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.q-dict-word b { font-size: 15px; color: var(--text); }
+.q-phon { font-size: 11px; color: var(--muted); }
+.q-dict-mean { font-size: 12px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
+.q-dict-ex {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  border-left: 2px solid #dfe9e0;
+  padding-left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.q-dict-zh { font-size: 11px; color: var(--muted); }
 
 .q-result { display: flex; flex-direction: column; gap: 8px; }
 .q-sec { display: flex; flex-direction: column; gap: 2px; }

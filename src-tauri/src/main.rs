@@ -710,6 +710,25 @@ fn current_port<R: Runtime>(app: &AppHandle<R>) -> Option<u16> {
         .filter(|port| *port > 0)
 }
 
+/// 快查浮窗尺寸（逻辑像素）。固定大小，内容超出时在窗口内滚动
+const QUICK_WIDTH: f64 = 520.0;
+const QUICK_HEIGHT: f64 = 620.0;
+/// 浮窗距屏幕边缘的留白
+const QUICK_MARGIN: f64 = 24.0;
+
+/// 计算浮窗初始位置：主显示器右上角。取不到显示器信息时退回固定位置。
+fn quick_window_position<R: Runtime>(app: &AppHandle<R>) -> (f64, f64) {
+    let Some(monitor) = app.primary_monitor().ok().flatten() else {
+        return (900.0, QUICK_MARGIN);
+    };
+    let scale = monitor.scale_factor();
+    let size = monitor.size();
+    let logical_w = size.width as f64 / scale;
+    let x = (logical_w - QUICK_WIDTH - QUICK_MARGIN).max(QUICK_MARGIN);
+    // 顶部对齐；屏幕比窗口还矮时也保持贴顶，保证输入框可见
+    (x, QUICK_MARGIN)
+}
+
 /// 按需创建快查浮窗（隐藏状态）。后端未就绪时返回 None，浮窗打不开是预期行为
 fn ensure_quick_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     if let Some(window) = app.get_webview_window(QUICK_LABEL) {
@@ -717,9 +736,11 @@ fn ensure_quick_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R
     }
     let port = current_port(app)?;
     let url = Url::parse(&format!("http://127.0.0.1:{port}/quick")).ok()?;
+    let (x, y) = quick_window_position(app);
     match WebviewWindowBuilder::new(app, QUICK_LABEL, WebviewUrl::External(url))
         .title("词札 · 快查")
-        .inner_size(460.0, 360.0)
+        .inner_size(QUICK_WIDTH, QUICK_HEIGHT)
+        .position(x, y)
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)

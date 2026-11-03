@@ -17,10 +17,11 @@
 .settings-shell { max-width: 1120px; margin: 0 auto; }
 
 .settings-tabs {
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
   gap: 4px;
   padding: 4px;
-  margin-bottom: 24px;
+  margin: 0 auto 24px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 10px;
