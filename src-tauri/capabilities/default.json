@@ -2,9 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "词札桌面 App 默认能力",
-  "windows": ["main"],
+  "windows": ["main", "quick"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "global-shortcut:default"
   ]
 }

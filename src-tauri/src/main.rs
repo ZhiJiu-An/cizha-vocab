@@ -6,7 +6,7 @@
 //!   3. 立即显示 loading 页面，后台探测 /api/health，就绪后再加载前端
 //!      —— 启动等待不阻塞 UI；失败时在 loading 页给出提示，而不是白等
 //!   4. 托盘图标（右键菜单：打开 / 隐藏 / 退出）
-//!   5. 全局快捷键（Cmd+Shift+C 唤起/隐藏窗口）
+//!   5. 全局快捷键（⌘⇧C 唤起/隐藏窗口，⌥A 输入翻译，⌥S 区域截图取词）
 //!   6. 应用退出时终止后端子进程（避免退出后残留后台服务）
 //!   7. 启动成功后看护后端：进程崩溃会自动回到启动页并重启
 
@@ -15,7 +15,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, RunEvent, Runtime,
+    AppHandle, Emitter, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use url::Url;
@@ -42,17 +42,35 @@ const READY_TIMEOUT: Duration = Duration::from_secs(30);
 /// 启动失败时的自动重试次数（上一次进程未退干净等偶发问题）
 const START_ATTEMPTS: u8 = 2;
 
-/// 全局状态：后端子进程 handle + 退出标记
+/// 全局状态：后端子进程 handle + 退出标记 + 后端端口
 struct AppState {
     backend: Mutex<Option<Child>>,
     /// 置位后看护线程立即停止，避免退出过程中又把后端拉起来
     stopping: AtomicBool,
+    /// 后端实际端口（系统分配），0 表示尚未就绪。快查浮窗的 URL 依赖它
+    port: AtomicU16,
+    /// 快查浮窗的待处理载荷：新建窗口首帧还没加载完时事件会丢，前端挂载后主动取一次
+    quick_pending: Mutex<Option<QuickPayload>>,
+}
+
+/// 快查浮窗载荷。`id` 用于前端去重（同一次打开可能既收到事件又取到 pending）
+#[derive(Clone, serde::Serialize)]
+struct QuickPayload {
+    id: u64,
+    /// "text" 输入翻译 / "image" 截图取词
+    mode: String,
+    /// data URL（image/png;base64）
+    image: Option<String>,
+    error: Option<String>,
 }
 
 // 菜单项 ID（托盘菜单）
 const MENU_SHOW: &str = "show";
 const MENU_HIDE: &str = "hide";
 const MENU_QUIT: &str = "quit";
+
+// 快查浮窗标签
+const QUICK_LABEL: &str = "quick";
 
 fn main() {
     // 先屏蔽退出信号，再创建任何线程：这样后续线程都继承屏蔽字，
@@ -69,12 +87,20 @@ fn main() {
         // macOS 会自动提供默认菜单栏（词札 / 文件 / 编辑 / 视图 / 窗口 / 帮助）
         // 已包含 Cmd+Q 退出、Cmd+W 关闭、Cmd+M 最小化 等原生行为
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // 快查浮窗用的 IPC：取待处理载荷 / 隐藏浮窗 / 把词交给主窗口
+        .invoke_handler(tauri::generate_handler![
+            quick_get_pending,
+            quick_hide,
+            open_main_query,
+        ])
         // macOS: show 窗口时强制激活（抢回焦点到最前，不管其他 App 是否在最前）
         .activate_ignoring_other_apps(true)
         .setup(|app| {
             app.manage(AppState {
                 backend: Mutex::new(None),
                 stopping: AtomicBool::new(false),
+                port: AtomicU16::new(0),
+                quick_pending: Mutex::new(None),
             });
 
             // 注销 / kill / Ctrl+C 不会触发 RunEvent::Exit，必须自己接管信号，
@@ -107,6 +133,10 @@ fn main() {
                 match start_backend(&app_handle) {
                     Ok(port) => {
                         println!("✅ 后端就绪，监听 http://127.0.0.1:{port}");
+                        // 端口要留给快查浮窗拼 URL（浮窗可能在启动后才按需创建）
+                        if let Some(state) = app_handle.try_state::<AppState>() {
+                            state.port.store(port as u16, Ordering::SeqCst);
+                        }
                         match Url::parse(&format!("http://127.0.0.1:{port}/")) {
                             Ok(url) => navigate(&app_handle, &window, url),
                             Err(e) => show_error_on_main(&app_handle, &window, &format!("地址解析失败：{e}")),
@@ -244,9 +274,18 @@ fn monitor_backend<R: Runtime>(
         match start_backend(&app) {
             Ok(port) => {
                 println!("✅ 后端已重启，监听 http://127.0.0.1:{port}");
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.port.store(port as u16, Ordering::SeqCst);
+                }
                 match Url::parse(&format!("http://127.0.0.1:{port}/")) {
                     Ok(url) => navigate(&app, &window, url),
                     Err(e) => show_error_on_main(&app, &window, &format!("地址解析失败：{e}")),
+                }
+                // 快查浮窗若已创建，也要跟到新端口，否则它下次打开会白屏
+                if let Some(quick) = app.get_webview_window(QUICK_LABEL) {
+                    if let Ok(url) = Url::parse(&format!("http://127.0.0.1:{port}/quick")) {
+                        navigate_with(&app, &quick, url, false);
+                    }
                 }
             }
             Err(message) => {
@@ -262,6 +301,16 @@ fn monitor_backend<R: Runtime>(
 
 /// 在主线程导航；导航失败时把原因写回启动页，而不是静默停在 loading
 fn navigate<R: Runtime>(app: &AppHandle<R>, window: &tauri::WebviewWindow<R>, url: Url) {
+    navigate_with(app, window, url, true);
+}
+
+/// `focus=false` 用于隐藏的快查浮窗：只换地址，不抢用户焦点
+fn navigate_with<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+    url: Url,
+    focus: bool,
+) {
     let window = window.clone();
     let _ = app.run_on_main_thread(move || {
         if let Err(e) = window.navigate(url) {
@@ -269,7 +318,7 @@ fn navigate<R: Runtime>(app: &AppHandle<R>, window: &tauri::WebviewWindow<R>, ur
             let _ = window.eval(format!(
                 "window.showStartupError && window.showStartupError({message});"
             ));
-        } else {
+        } else if focus {
             let _ = window.set_focus();
         }
     });
@@ -334,19 +383,39 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-/// 注册全局快捷键 Cmd+Shift+C（唤起/隐藏窗口）
+/// 注册全局快捷键：
+///   ⌘⇧C 唤起/隐藏主窗口
+///   ⌥A   输入翻译（弹出快查浮窗）
+///   ⌥S   区域截图取词（调 macOS 自带 screencapture）
 fn setup_shortcuts<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
-    // Cmd+Shift+C: Modifiers::SUPER = Cmd on macOS
-    let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC);
-
-    app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
-        if event.state == ShortcutState::Pressed {
-            toggle_window(app, !is_window_visible(app));
-        }
-    })?;
-
-    println!("⌨️  全局快捷键 Cmd+Shift+C 已注册");
+    // Modifiers::SUPER = Cmd on macOS，ALT = Option
+    register_shortcut(app, Modifiers::SUPER | Modifiers::SHIFT, Code::KeyC, "⌘⇧C 唤起主窗口", |app, _| {
+        toggle_window(app, !is_window_visible(app));
+    });
+    register_shortcut(app, Modifiers::ALT, Code::KeyA, "⌥A 输入翻译", |app, _| {
+        open_quick_text(app);
+    });
+    register_shortcut(app, Modifiers::ALT, Code::KeyS, "⌥S 截图取词", |app, _| {
+        open_quick_shot(app);
+    });
     Ok(())
+}
+
+/// 单个快捷键注册失败（组合被其他应用占用）不应拖垮启动，只记日志
+fn register_shortcut<R, F>(app: &AppHandle<R>, modifiers: Modifiers, code: Code, label: &str, handler: F)
+where
+    R: Runtime,
+    F: Fn(&AppHandle<R>, &Shortcut) + Send + Sync + 'static,
+{
+    let shortcut = Shortcut::new(Some(modifiers), code);
+    match app.global_shortcut().on_shortcut(shortcut, move |app, shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            handler(app, shortcut);
+        }
+    }) {
+        Ok(()) => println!("⌨️  已注册全局快捷键 {label}"),
+        Err(e) => eprintln!("⚠️  注册全局快捷键 {label} 失败（组合可能已被其他应用占用）: {e}"),
+    }
 }
 
 fn is_window_visible<R: Runtime>(app: &AppHandle<R>) -> bool {
@@ -365,6 +434,182 @@ fn toggle_window<R: Runtime>(app: &AppHandle<R>, show: bool) {
             println!("📥 窗口已隐藏");
         }
     }
+}
+
+/// 后端实际端口；0 表示启动流程还没跑完
+fn current_port<R: Runtime>(app: &AppHandle<R>) -> Option<u16> {
+    app.try_state::<AppState>()
+        .map(|state| state.port.load(Ordering::SeqCst))
+        .filter(|port| *port > 0)
+}
+
+/// 按需创建快查浮窗（隐藏状态）。后端未就绪时返回 None，浮窗打不开是预期行为
+fn ensure_quick_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
+    if let Some(window) = app.get_webview_window(QUICK_LABEL) {
+        return Some(window);
+    }
+    let port = current_port(app)?;
+    let url = Url::parse(&format!("http://127.0.0.1:{port}/quick")).ok()?;
+    match WebviewWindowBuilder::new(app, QUICK_LABEL, WebviewUrl::External(url))
+        .title("词札 · 快查")
+        .inner_size(460.0, 360.0)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()
+    {
+        Ok(window) => Some(window),
+        Err(e) => {
+            eprintln!("⚠️  快查浮窗创建失败: {e}");
+            None
+        }
+    }
+}
+
+/// 显示浮窗并投递载荷。
+/// 新建窗口时首帧还没加载完，事件可能丢失 —— 先存进 pending，前端挂载后自己取。
+/// 窗口创建统一回主线程：从快捷键/截图线程直接建窗在 macOS 上会卡死。
+fn show_quick<R: Runtime>(app: &AppHandle<R>, payload: QuickPayload) {
+    let existed = app.get_webview_window(QUICK_LABEL).is_some();
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut pending) = state.quick_pending.lock() {
+            *pending = if existed { None } else { Some(payload.clone()) };
+        }
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(window) = ensure_quick_window(&handle) else {
+            eprintln!("⚠️  快查浮窗不可用（后端可能还没就绪）");
+            return;
+        };
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = handle.emit_to(QUICK_LABEL, "quick-open", payload);
+    });
+}
+
+fn next_payload_id() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+fn open_quick_text<R: Runtime>(app: &AppHandle<R>) {
+    show_quick(
+        app,
+        QuickPayload {
+            id: next_payload_id(),
+            mode: "text".into(),
+            image: None,
+            error: None,
+        },
+    );
+}
+
+/// 截图是阻塞操作（用户在框选），不能卡住快捷键回调线程
+fn open_quick_shot<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    thread::spawn(move || {
+        // 浮窗若已在屏幕上，先藏起来，避免把自己截进去
+        if let Some(window) = app.get_webview_window(QUICK_LABEL) {
+            let _ = window.hide();
+        }
+        thread::sleep(Duration::from_millis(120));
+
+        let payload = match capture_region() {
+            Ok(Some(image)) => QuickPayload {
+                id: next_payload_id(),
+                mode: "image".into(),
+                image: Some(image),
+                error: None,
+            },
+            // 用户按 Esc 取消，安静收场
+            Ok(None) => return,
+            Err(message) => QuickPayload {
+                id: next_payload_id(),
+                mode: "text".into(),
+                image: None,
+                error: Some(format!("截图失败：{message}")),
+            },
+        };
+        show_quick(&app, payload);
+    });
+}
+
+/// 调系统自带 screencapture 做区域截图，返回 data URL；Ok(None) = 用户取消。
+/// 首次使用会要求「屏幕录制」权限，被拒时 stderr 有内容，原样带回前端提示。
+#[cfg(target_os = "macos")]
+fn capture_region() -> Result<Option<String>, String> {
+    use base64::Engine;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("cizha-shot-{nanos}.png"));
+
+    let output = Command::new("/usr/sbin/screencapture")
+        .args(["-i", "-x", "-o", "-t", "png"])
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("无法启动系统截图：{e}"))?;
+
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&path);
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return if stderr.is_empty() { Ok(None) } else { Err(stderr) };
+    }
+
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取截图失败：{e}"));
+    let _ = std::fs::remove_file(&path);
+    let bytes = bytes?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_region() -> Result<Option<String>, String> {
+    Err("截图取词目前仅支持 macOS".into())
+}
+
+/// 前端挂载后主动取一次（新建窗口时事件可能比页面加载更早）
+#[tauri::command]
+fn quick_get_pending(state: tauri::State<'_, AppState>) -> Option<QuickPayload> {
+    state.quick_pending.lock().ok().and_then(|mut pending| pending.take())
+}
+
+#[tauri::command]
+fn quick_hide(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(QUICK_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+/// 把词交给主窗口的词典页（/?q=xxx），复用完整的双栏结果
+#[tauri::command]
+fn open_main_query(app: tauri::AppHandle, word: String) -> Result<(), String> {
+    let word = word.trim().to_string();
+    if word.is_empty() {
+        return Err("单词不能为空".into());
+    }
+    let port = current_port(&app).ok_or("后端尚未就绪")?;
+    let main = app.get_webview_window("main").ok_or("找不到主窗口")?;
+    let mut url =
+        Url::parse(&format!("http://127.0.0.1:{port}/")).map_err(|e| e.to_string())?;
+    url.query_pairs_mut().append_pair("q", &word);
+    let _ = main.show();
+    navigate(&app, &main, url);
+    if let Some(window) = app.get_webview_window(QUICK_LABEL) {
+        let _ = window.hide();
+    }
+    Ok(())
 }
 
 fn cleanup_backend<R: Runtime>(app: &AppHandle<R>) {

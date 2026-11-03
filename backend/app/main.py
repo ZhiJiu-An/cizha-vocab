@@ -10,10 +10,10 @@ from dotenv import load_dotenv
 
 from .database import engine, Base
 from .paths import get_data_dir, get_env_path
-from .routes import words, dictionary, translate, stats, ocr, review, llm_config
+from .routes import words, dictionary, translate, stats, ocr, review, llm_config, prefs
 
 # 版本号只在这里定义一次，/api/health 与根路径兜底都引用它
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 APP_NAME = "词札单词库"
 
 # 加载 .env（源码模式 = backend/.env；PyInstaller 模式 = ~/Library/Application Support/cizha/.env）
@@ -128,6 +128,7 @@ app.include_router(review.router)
 app.include_router(stats.router)
 app.include_router(ocr.router)
 app.include_router(llm_config.router)
+app.include_router(prefs.router)
 
 
 @app.get("/api/health")

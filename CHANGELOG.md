@@ -3,17 +3,17 @@
 本项目的所有重要变更记录在此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.2.2] - 2026-11-02
-
-### 安全
-
-- **打包产物不再携带开发者数据**：PyInstaller 配置移除 `backend/data/`，`prepare-sidecar.py` 在复制后额外清洗 `.env`、`llm_config.json` 与 `*.db`，避免真实 API Key 和个人词库随 App 分发
-- **下架含真实数据的安装包**：v0.2.1 的 `cizha_0.2.1_aarch64.dmg` 内含开发者真实 API Key 与个人词库，已从 Release 删除并重新发布本版本
-- **公开仓库历史清理**：内部开发文档（`AGENTS.md`、`ARCHITECTURE.md`、`PRD.md`、`.trae/`、`docs/desktop/`）与其中的本机绝对路径已从 Git 历史中移除
-
-## [Unreleased]
+## [0.2.3] - 2026-11-03
 
 ### 新增
+
+- **桌面全局快捷键 + 快查浮窗**
+  - `⌥A` 输入翻译：按需创建置顶小窗 `/quick`，输入单词回车即流式展示「中文定名 / 缩写展开 / 领域详解」，`Esc` 收起
+  - `⌥S` 截图取词：调用系统 `/usr/sbin/screencapture -i -x -o` 框选区域 → data URL → 复用 `/api/ocr/extract`；首次使用需在「系统设置 → 隐私与安全 → 屏幕录制」授权
+  - 浮窗内点击术语或「在主窗口查看完整结果」→ 主窗口跳到 `/?q=xxx`，复用完整双栏结果
+  - 后端崩溃重启换端口时，已创建的浮窗同步导航到新端口
+  - 应用内快捷键：`⌘K` 聚焦顶栏搜索、`⌘1~⌘5` 切换页面、`⌘N` 新建词条、`⌘S` 保存、`Esc` 关闭悬浮详情 / 快查浮窗
+  - 新增依赖：`@tauri-apps/api`（前端）、`base64`（截图编码）
 
 - **Tauri 2 桌面壳层（Phase 3-4 ✅）**
   - `src-tauri/`：完整 Tauri 2 桌面项目（壳层 + sidecar + 托盘 + 全局快捷键）
@@ -34,6 +34,17 @@
   - `.github/workflows/desktop_build.yml`：tag `v*` 时自动并发打 macOS arm64 / Linux amd64 / Windows amd64 三份 PyInstaller onedir 产物，打包为 tar.gz 挂 Release 附件
 
 ### 修复
+
+- **设置重启后全部变回默认值**（昵称 / 发音口音 / 学习提醒）
+  - 根因：桌面版后端以 `--port 0` 随机端口启动，WebView 的 localStorage 按 `scheme://host:port` 的 origin 隔离，每次重启都等于换了一个存储空间
+  - 偏好改为落盘 `<data_dir>/prefs.json`：新增 `GET/PUT /api/prefs`，原子写（临时文件 + `os.replace`），文件损坏或字段非法时回退默认值
+  - 前端启动时先 `loadPrefs()` 回填再挂载，变更防抖写回后端；localStorage 仅作同步缓存
+  - 「今日已提醒」一并纳入偏好持久化，重启后不会重复弹出学习提醒
+  - 后续快捷键设置可复用同一套偏好通道，不再受端口变化影响
+
+- **复习页「错词优先」点击无响应**
+  - 移除该选项与相关逻辑，复习队列统一按到期时间排序
+  - 统计页「最常忘记的词」说明文案同步修正
 
 - **桌面版启动慢 / 卡 loading / 偶发启动失败**
   - PyInstaller 由 onefile 改为 onedir：启动不再每次解压 ~39MB，实测就绪时间从 ~6 秒降到 0.6~2 秒
@@ -63,6 +74,14 @@
   - `backend/run.py`：PyInstaller 入口脚本，替代 `uvicorn app.main:app` 命令行方式
   - `build/pyinstaller/cizha-backend.spec`：打包配置，`collect_all app` 确保 FastAPI 路由隐式 import 全收
 
+
+## [0.2.2] - 2026-11-02
+
+### 安全
+
+- **打包产物不再携带开发者数据**：PyInstaller 配置移除 `backend/data/`，`prepare-sidecar.py` 在复制后额外清洗 `.env`、`llm_config.json` 与 `*.db`，避免真实 API Key 和个人词库随 App 分发
+- **下架含真实数据的安装包**：v0.2.1 的 `cizha_0.2.1_aarch64.dmg` 内含开发者真实 API Key 与个人词库，已从 Release 删除并重新发布本版本
+- **公开仓库历史清理**：内部开发文档（`AGENTS.md`、`ARCHITECTURE.md`、`PRD.md`、`.trae/`、`docs/desktop/`）与其中的本机绝对路径已从 Git 历史中移除
 
 ## [0.1.1] - 2026-10-22
 
@@ -102,7 +121,7 @@
 - `.env`、`backend/data/`（含用户配置与 API Key）不纳入版本控制
 - 历史提交中的作者邮箱统一为 GitHub noreply 地址
 
-[Unreleased]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.2.2...HEAD
+[0.2.3]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.2.1...v0.2.2
 [0.1.1]: https://github.com/ZhiJiu-An/cizha-vocab/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.1.0

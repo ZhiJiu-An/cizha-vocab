@@ -104,7 +104,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createWord, getWord, lookupDictionary, updateWord } from '../api'
 import { toast } from '../utils'
@@ -227,8 +227,17 @@ function reset() {
   hint.value = { text: '✨ 点「自动补全」可调词典 API 回填音标、通用释义、例句', cls: 'hint' }
 }
 
+// 应用内快捷键：⌘S 保存（macOS 用户肌肉记忆）
+function onKeydown(e) {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    if (!saving.value) save()
+  }
+}
+
 /* ===== 编辑时载入原数据 ===== */
 onMounted(async () => {
+  window.addEventListener('keydown', onKeydown)
   if (!isEdit.value) return
   try {
     const w = await getWord(editId.value)
@@ -250,4 +259,6 @@ onMounted(async () => {
     router.push('/words')
   }
 })
+
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>

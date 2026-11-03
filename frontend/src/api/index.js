@@ -77,7 +77,7 @@ export const getDueWords = (params = {}) => api.get('/review/due', { params }).t
 export const submitReviewAnswer = (wordId, result) =>
   api.post(`/review/${wordId}/answer`, { result }).then((r) => r.data)
 
-// 错词本（v0.11）：按「忘记」次数降序，供复习页错词优先与统计页错词榜使用
+// 错词本（v0.11）：按「忘记」次数降序，供统计页错词榜使用
 export const getMistakes = (params = {}) =>
   api.get('/review/mistakes', { params }).then((r) => r.data)
 
@@ -102,3 +102,10 @@ export const testModel = (data) =>
   api.post('/llm/models/test', data, { timeout: TEST_TIMEOUT }).then((r) => r.data)
 export const setDefaultModel = (id) =>
   api.post(`/llm/models/${id}/default`).then((r) => r.data)
+
+/* ========= 用户偏好 ========= */
+// 桌面版端口每次启动都变，localStorage 会丢；偏好统一走后端落盘。
+// 读偏好只在启动时做一次，超时压到 1.5s，后端异常时用本地缓存兜底。
+export const getPrefs = () =>
+  api.get('/prefs', { timeout: 1500 }).then((r) => r.data)
+export const savePrefs = (data) => api.put('/prefs', data).then((r) => r.data)

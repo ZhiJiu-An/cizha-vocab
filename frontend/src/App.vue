@@ -1,5 +1,8 @@
 <template>
-  <div class="app">
+  <!-- 桌面快查浮窗：只渲染页面本身，不套侧边栏 / 顶栏 -->
+  <div v-if="isQuick" class="quick-shell"><router-view /></div>
+
+  <div v-else class="app">
     <aside class="sidebar">
       <router-link to="/" class="logo">
         <span class="icon">✳</span>
@@ -31,10 +34,11 @@
         <div><span>我的学习空间</span><i>/</i><b>{{ currentTitle }}</b></div>
 
         <!-- 顶栏全局搜索（v0.11）：任意页面直接搜词，不用先回首页。
-             刻意不绑定快捷键 —— 快捷键只在标签页聚焦时有效，鼠标入口才是主路径。 -->
+             桌面版新增 ⌘K 聚焦，网页版仍以鼠标入口为主。 -->
         <form class="header-search" role="search" @submit.prevent="goSearch">
           <span class="hs-icon">⌕</span>
           <input
+            ref="headerSearchRef"
             v-model="globalQuery"
             type="search"
             placeholder="搜索词条、术语…"
@@ -72,6 +76,8 @@ const route = useRoute()
 const router = useRouter()
 const dueCount = ref(0)
 const globalQuery = ref('')
+const headerSearchRef = ref(null)
+const isQuick = computed(() => route.path === '/quick')
 const name = computed(displayName)
 const avatar = computed(avatarText)
 const currentTitle = computed(() => ({ '/': '词典', '/words': '词库', '/review': '复习', '/stats': '统计', '/tags': '标签', '/settings': '设置', '/settings/models': '模型配置', '/new': '新建词条' }[route.path] || (route.path.includes('/edit') || route.path.match(/^\/words\/\d+$/) ? '词条详情' : '词典')))
@@ -99,6 +105,30 @@ function goSearch() {
   globalQuery.value = ''
 }
 
+/* ===== 应用内快捷键（桌面版）=====
+   ⌘K 聚焦顶栏搜索 · ⌘1~⌘5 切换页面 · ⌘N 新建词条
+   ⌘S 由编辑页自己处理，Esc 由详情弹窗 / 快查浮窗自己处理。 */
+function onShortcutKeydown(e) {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || isQuick.value) return
+
+  const key = e.key.toLowerCase()
+  if (key === 'k') {
+    e.preventDefault()
+    headerSearchRef.value?.focus()
+    headerSearchRef.value?.select()
+    return
+  }
+  if (key === 'n') {
+    e.preventDefault()
+    router.push('/new')
+    return
+  }
+  if (['1', '2', '3', '4', '5'].includes(key)) {
+    e.preventDefault()
+    router.push(navItems[Number(key) - 1].path)
+  }
+}
+
 // Toast 上的操作按钮（v0.11）：如删除后的「撤销」
 async function runToastAction(item) {
   const action = item.action
@@ -112,7 +142,7 @@ async function runToastAction(item) {
 
 // 路由切换时刷新复习到期数徽章
 // 返回是否刷新成功：首次提醒要等真实到期数拿到后再判断，否则会拿着初始 0
-// 写入「今天已提醒」的键，导致当天真正的提醒被吞掉（v0.13）。
+// 写入「今天已提醒」导致当天真正的提醒被吞掉（v0.13）。
 async function refreshDue() {
   try {
     const ov = await getReviewOverview()
@@ -125,8 +155,7 @@ async function refreshDue() {
 }
 
 // 学习提醒：页面保持打开时，到点后 1 小时内提醒一次，每天最多一次
-const REMIND_KEY = 'cizha_reminded_on'
-
+// 「今天已提醒」跟着偏好一起落盘 —— localStorage 会随随机端口重置（v0.16）
 function checkReminder() {
   const { enabled, time } = prefs.reminder
   if (!enabled) return
@@ -136,8 +165,8 @@ function checkReminder() {
   const target = h * 60 + m
   if (nowMin < target || nowMin - target > 60) return
   const dayKey = `${now.toDateString()} ${time}`
-  if (localStorage.getItem(REMIND_KEY) === dayKey) return
-  localStorage.setItem(REMIND_KEY, dayKey)
+  if (prefs.reminder.last_notified === dayKey) return
+  prefs.reminder.last_notified = dayKey
   // v0.11：页面在后台时走系统通知，否则用应用内 toast（见 utils.deliverReminder）
   deliverReminder(
     dueCount.value > 0
@@ -149,10 +178,16 @@ function checkReminder() {
 let reminderTimer
 
 onMounted(async () => {
+  // 快查浮窗不跑主界面的复习提醒，避免两个窗口重复计时
+  if (isQuick.value) return
+  window.addEventListener('keydown', onShortcutKeydown)
   // 先拿到真实到期数再判断是否提醒；拉取失败则跳过本次，也不写提醒键
   if (await refreshDue()) checkReminder()
   reminderTimer = setInterval(checkReminder, 60_000)
 })
-onUnmounted(() => clearInterval(reminderTimer))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onShortcutKeydown)
+  clearInterval(reminderTimer)
+})
 watch(() => route.path, refreshDue)
 </script>

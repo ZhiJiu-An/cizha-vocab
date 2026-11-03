@@ -107,7 +107,7 @@
         <span class="hbar-num">忘 {{ m.forget_times }} / {{ m.total_reviews }} 次</span>
       </div>
       <div class="sb-hint">
-        去「🧠 复习」选 <b>🎯 错词优先</b> 可以优先重练这些词
+        复习时按到期时间排序，「忘记」过的词会按间隔重新排进队列
       </div>
     </div>
     <div class="stat-block" v-else>

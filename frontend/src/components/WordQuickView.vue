@@ -125,7 +125,7 @@
  * 词库悬浮详情窗（P3-2）：点卡片就地预览，不再跳转 /words/:id。
  * 编辑仍跳编辑页；删除抛给列表页走统一的确认弹窗。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Phonetics from './Phonetics.vue'
 import WordBadge from './WordBadge.vue'
@@ -182,7 +182,13 @@ async function resetProgress() {
   }
 }
 
+// 应用内快捷键：Esc 关闭悬浮详情
+function onKeydown(e) {
+  if (e.key === 'Escape') emit('close')
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', onKeydown)
   try {
     word.value = await getWord(props.wordId)
   } catch (e) {
@@ -192,6 +198,7 @@ onMounted(async () => {
     loading.value = false
   }
 })
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <style scoped>

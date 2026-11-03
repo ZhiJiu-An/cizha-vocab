@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "词札",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "identifier": "com.cizha.vocab",
   "build": {
     "frontendDist": "../frontend/dist"
