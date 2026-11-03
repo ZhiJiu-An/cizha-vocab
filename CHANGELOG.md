@@ -3,6 +3,29 @@
 本项目的所有重要变更记录在此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **设置页改为分类页签**
+  - `/settings` 变成壳层页签（通用 / 模型 / 快捷键），子路由 `general`、`models`、`shortcuts`；旧的 `/settings/models` 深链保持可用
+  - 通用页承接昵称、发音偏好、学习提醒；模型页保留原配置能力并迁入「配置小抄」
+
+- **局内快捷键可自定义**
+  - 新增动作表（聚焦搜索 / 新建 / 页面切换 / 保存 / 复习翻面与自评 / 关闭快查），默认值沿用原行为
+  - 设置页可直接录键，校验系统保留组合与同表冲突；配置随偏好写入 `prefs.json` 的 `shortcuts.in_app`
+  - App.vue / WordForm / Review / QuickTranslate 统一按配置匹配，不再写死组合键
+
+- **全局快捷键可查看与改绑**
+  - Rust 侧新增 `get_global_shortcuts` / `set_global_shortcut` / `reset_global_shortcuts`
+  - 绑定结果落盘 `app_config_dir()/shortcuts.json`，启动时读取并注册；空组合表示禁用
+  - 改绑失败自动回滚旧键，错误回传设置页；被其他应用占用不影响应用启动
+
+### 变更
+
+- 后端 `PUT /api/prefs` 新增 `shortcuts.in_app` 字段，旧客户端缺字段时自动补默认值；对未知类型与超长键值做清洗
+- 后端测试由 210 项增至 219 项
+
 ## [0.2.3] - 2026-11-03
 
 ### 新增
