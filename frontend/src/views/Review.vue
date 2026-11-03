@@ -141,6 +141,8 @@ import Phonetics from '../components/Phonetics.vue'
 import WordBadge from '../components/WordBadge.vue'
 import { getReviewOverview, getDueWords, submitReviewAnswer, listTags } from '../api'
 import { toast, parseTags, cardType } from '../utils'
+import { prefs } from '../utils/prefs'
+import { effectiveInAppShortcuts, matchesCombo } from '../utils/shortcuts'
 
 const phase = ref('ready')           // ready / reviewing / done
 const overview = ref({ due_today: 0, reviewed_today: 0, total_in_queue: 0 })
@@ -243,16 +245,20 @@ function restart() {
   loadReady()
 }
 
-// 快捷键：空格翻面，1/2/3 自评（仅翻面后）
+// 快捷键：默认空格翻面，1/2/3 自评（仅翻面后）；可在设置中改
 function onKeydown(e) {
   if (phase.value !== 'reviewing') return
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-  if (e.code === 'Space') {
+  const map = effectiveInAppShortcuts(prefs.shortcuts.in_app)
+  if (matchesCombo(e, map.review_flip)) {
     e.preventDefault()
     flipped.value = !flipped.value
-  } else if (flipped.value && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) {
-    answer({ Digit1: 'forget', Digit2: 'fuzzy', Digit3: 'remember' }[e.code])
+    return
   }
+  if (!flipped.value) return
+  if (matchesCombo(e, map.review_forget)) answer('forget')
+  else if (matchesCombo(e, map.review_fuzzy)) answer('fuzzy')
+  else if (matchesCombo(e, map.review_remember)) answer('remember')
 }
 
 onMounted(() => {

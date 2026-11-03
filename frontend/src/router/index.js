@@ -12,9 +12,17 @@ const routes = [
   { path: '/tags', name: 'Tags', component: () => import('../views/TagList.vue') },
   { path: '/review', name: 'Review', component: () => import('../views/Review.vue') },
   { path: '/stats', name: 'Stats', component: () => import('../views/Stats.vue') },
-  { path: '/settings', name: 'Settings', component: () => import('../views/Settings.vue') },
-  // 模型与提示词（v0.12）：从设置页进入，导航栏保持 5 项不变
-  { path: '/settings/models', name: 'ModelSettings', component: () => import('../views/ModelSettings.vue') },
+  {
+    path: '/settings',
+    name: 'Settings',
+    component: () => import('../views/Settings.vue'),
+    children: [
+      { path: '', redirect: '/settings/general' },
+      { path: 'general', name: 'SettingsGeneral', component: () => import('../views/SettingsGeneral.vue') },
+      { path: 'models', name: 'ModelSettings', component: () => import('../views/ModelSettings.vue') },
+      { path: 'shortcuts', name: 'SettingsShortcuts', component: () => import('../views/SettingsShortcuts.vue') },
+    ],
+  },
   // 桌面快查浮窗（⌥A 输入翻译 / ⌥S 截图取词）：由 Tauri 单独开小窗加载，
   // 页面在 App.vue 里不套侧边栏与顶栏
   { path: '/quick', name: 'Quick', component: () => import('../views/QuickTranslate.vue') },

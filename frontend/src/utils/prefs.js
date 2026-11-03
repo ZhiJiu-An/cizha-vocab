@@ -14,6 +14,8 @@ const defaults = {
   nickname: '词札学习者',
   accent: 'us', // us / uk
   reminder: { enabled: false, time: '20:00', last_notified: '' },
+  // 应用内快捷键：动作 ID -> 组合键。"Mod" = macOS ⌘ / Windows·Linux Ctrl
+  shortcuts: { in_app: {} },
 }
 
 function normalize(raw) {
@@ -22,6 +24,11 @@ function normalize(raw) {
     ...defaults,
     ...data,
     reminder: { ...defaults.reminder, ...(data.reminder || {}) },
+    shortcuts: {
+      ...defaults.shortcuts,
+      ...(data.shortcuts || {}),
+      in_app: { ...(data.shortcuts?.in_app || {}) },
+    },
   }
 }
 

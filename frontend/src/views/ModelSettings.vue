@@ -156,6 +156,17 @@
         </template>
       </section>
     </div>
+
+    <div class="models-cheatsheet">
+      <h3>配置小抄</h3>
+      <ul>
+        <li>地址填到 <code>/v1</code> 这一层，不要带 <code>/chat/completions</code>。</li>
+        <li>DeepSeek 官方 API 没有视觉模型，视觉模型需另配一家（如阿里百炼 <code>qwen3-vl-plus</code>、智谱 <code>glm-4v</code>）。</li>
+        <li>模型列表保存在 <code>backend/data/llm_config.json</code>；<code>backend/.env</code> 只在首次初始化时作为默认值。</li>
+        <li>文本模型的提示词必须保留五段标记与 <code>{word}</code> 占位符，可在预设基础上按领域微调。</li>
+        <li>「连通测试会消耗少量 token」：每次保存或测试都会真实调用一次模型。</li>
+      </ul>
+    </div>
   </div>
 </template>
 
@@ -361,6 +372,28 @@ onMounted(() => load())
 
 <style scoped>
 .models-page { max-width: 1120px; margin: 0 auto; }
+
+/* 配置小抄：从通用设置页迁到这里，和模型配置放在一起 */
+.models-cheatsheet {
+  margin-top: 22px;
+  padding: 20px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.models-cheatsheet h3 { font-size: 15px; margin-bottom: 8px; }
+.models-cheatsheet ul {
+  font-size: 13px;
+  color: var(--text-light);
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.models-cheatsheet code {
+  background: #e8ede4;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
 
 .models-layout {
   display: grid;

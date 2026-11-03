@@ -78,6 +78,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { extractWordsFromImage } from '../api'
+import { prefs } from '../utils/prefs'
+import { effectiveInAppShortcuts, matchesCombo } from '../utils/shortcuts'
 
 // 同一份前端也会跑在浏览器里（npm run dev），非 Tauri 环境下 IPC 一律跳过
 const isTauri = Boolean(window.__TAURI_INTERNALS__)
@@ -276,10 +278,10 @@ async function hideSelf() {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    hideSelf()
-  }
+  const combo = effectiveInAppShortcuts(prefs.shortcuts.in_app).close_quick
+  if (!matchesCombo(e, combo)) return
+  e.preventDefault()
+  hideSelf()
 }
 
 onMounted(async () => {

@@ -70,6 +70,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { deliverReminder, dismissToast, toastState, toast } from './utils'
 import { prefs, displayName, avatarText } from './utils/prefs'
+import { effectiveInAppShortcuts, matchesCombo } from './utils/shortcuts'
 import { getReviewOverview } from './api'
 
 const route = useRoute()
@@ -80,7 +81,7 @@ const headerSearchRef = ref(null)
 const isQuick = computed(() => route.path === '/quick')
 const name = computed(displayName)
 const avatar = computed(avatarText)
-const currentTitle = computed(() => ({ '/': '词典', '/words': '词库', '/review': '复习', '/stats': '统计', '/tags': '标签', '/settings': '设置', '/settings/models': '模型配置', '/new': '新建词条' }[route.path] || (route.path.includes('/edit') || route.path.match(/^\/words\/\d+$/) ? '词条详情' : '词典')))
+const currentTitle = computed(() => ({ '/': '词典', '/words': '词库', '/review': '复习', '/stats': '统计', '/tags': '标签', '/settings': '设置', '/settings/general': '通用设置', '/settings/models': '模型配置', '/settings/shortcuts': '快捷键', '/new': '新建词条' }[route.path] || (route.path.includes('/edit') || route.path.match(/^\/words\/\d+$/) ? '词条详情' : '词典')))
 const today = new Intl.DateTimeFormat('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
 
 const navItems = [
@@ -106,26 +107,36 @@ function goSearch() {
 }
 
 /* ===== 应用内快捷键（桌面版）=====
-   ⌘K 聚焦顶栏搜索 · ⌘1~⌘5 切换页面 · ⌘N 新建词条
-   ⌘S 由编辑页自己处理，Esc 由详情弹窗 / 快查浮窗自己处理。 */
-function onShortcutKeydown(e) {
-  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || isQuick.value) return
+   组合键来自 prefs.shortcuts.in_app，默认 ⌘K 聚焦搜索 / ⌘N 新建 / ⌘1~5 切页。
+   保存、复习自评、关闭浮窗由各自页面处理（见 utils/shortcuts.js 的动作表）。 */
+const shortcuts = computed(() => effectiveInAppShortcuts(prefs.shortcuts.in_app))
+const NAV_ACTIONS = {
+  nav_dict: '/',
+  nav_words: '/words',
+  nav_review: '/review',
+  nav_stats: '/stats',
+  nav_settings: '/settings',
+}
 
-  const key = e.key.toLowerCase()
-  if (key === 'k') {
+function onShortcutKeydown(e) {
+  if (isQuick.value) return
+  if (matchesCombo(e, shortcuts.value.focus_search)) {
     e.preventDefault()
     headerSearchRef.value?.focus()
     headerSearchRef.value?.select()
     return
   }
-  if (key === 'n') {
+  if (matchesCombo(e, shortcuts.value.new_word)) {
     e.preventDefault()
     router.push('/new')
     return
   }
-  if (['1', '2', '3', '4', '5'].includes(key)) {
-    e.preventDefault()
-    router.push(navItems[Number(key) - 1].path)
+  for (const [id, path] of Object.entries(NAV_ACTIONS)) {
+    if (matchesCombo(e, shortcuts.value[id])) {
+      e.preventDefault()
+      router.push(path)
+      return
+    }
   }
 }
 
