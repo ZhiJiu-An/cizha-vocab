@@ -25,6 +25,9 @@ DEFAULT_PREFS: dict = {
     "nickname": "词札学习者",
     "accent": "us",
     "reminder": {"enabled": False, "time": "20:00", "last_notified": ""},
+    # 应用内快捷键：动作 ID -> 组合键（如 "Mod+K"）。
+    # 全局快捷键由 Rust 壳持有（shortcuts.json），不在这里，避免启动时依赖后端。
+    "shortcuts": {"in_app": {}},
 }
 
 _write_lock = threading.Lock()
@@ -37,10 +40,16 @@ class ReminderPrefs(BaseModel):
     last_notified: str = Field("", max_length=32)
 
 
+class ShortcutPrefs(BaseModel):
+    # 只存用户改过的动作也没问题：前端会与默认表合并后再使用
+    in_app: dict[str, str] = Field(default_factory=dict)
+
+
 class PrefsPayload(BaseModel):
     nickname: str = Field("词札学习者", max_length=16)
     accent: Literal["us", "uk"] = "us"
     reminder: ReminderPrefs = Field(default_factory=ReminderPrefs)
+    shortcuts: ShortcutPrefs = Field(default_factory=ShortcutPrefs)
 
 
 def _prefs_path() -> Path:
@@ -63,6 +72,16 @@ def _merge(raw: dict) -> dict:
             data["reminder"]["time"] = reminder["time"]
         if isinstance(reminder.get("last_notified"), str):
             data["reminder"]["last_notified"] = reminder["last_notified"]
+    shortcuts = raw.get("shortcuts")
+    if isinstance(shortcuts, dict):
+        in_app = shortcuts.get("in_app")
+        if isinstance(in_app, dict):
+            cleaned = {
+                key[:32]: value[:64]
+                for key, value in in_app.items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
+            data["shortcuts"]["in_app"] = dict(list(cleaned.items())[:32])
     return data
 
 
@@ -77,7 +96,8 @@ def read_prefs() -> dict:
 
 @router.put("")
 def save_prefs(payload: PrefsPayload) -> dict:
-    data = payload.model_dump()
+    # 走一次 _merge：截断超长键值，并保证旧客户端提交时缺失的新字段有默认值
+    data = _merge(payload.model_dump())
     path = _prefs_path()
     with _write_lock:
         path.parent.mkdir(parents=True, exist_ok=True)

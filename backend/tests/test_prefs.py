@@ -47,6 +47,7 @@ class PrefsTestCase(ApiTestCase):
                 "time": "21:30",
                 "last_notified": "2026-11-03 21:30",
             },
+            "shortcuts": {"in_app": {"focus_search": "Mod+Shift+K"}},
         }
         resp = self.client.put("/api/prefs", json=payload)
         self.assertEqual(resp.status_code, 200, resp.text)
@@ -75,3 +76,33 @@ class PrefsTestCase(ApiTestCase):
         self.assertEqual(data["accent"], "uk")
         self.assertFalse(data["reminder"]["enabled"])
         self.assertEqual(data["nickname"], "词札学习者")
+        # 旧版本文件没有 shortcuts 字段时补成空表
+        self.assertEqual(data["shortcuts"], {"in_app": {}})
+
+    def test_shortcuts_roundtrip(self):
+        payload = {"shortcuts": {"in_app": {"nav_stats": "Mod+Alt+4"}}}
+        resp = self.client.put("/api/prefs", json=payload)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(
+            self.client.get("/api/prefs").json()["shortcuts"]["in_app"],
+            {"nav_stats": "Mod+Alt+4"},
+        )
+
+    def test_invalid_shortcut_values_ignored(self):
+        # 磁盘上的脏数据不能把整个设置读挂：非字符串直接丢弃
+        self.path.write_text(
+            json.dumps({"shortcuts": {"in_app": {"nav_stats": 4, "new_word": "Mod+N"}}}),
+            encoding="utf-8",
+        )
+        data = self.client.get("/api/prefs").json()
+        self.assertEqual(data["shortcuts"]["in_app"], {"new_word": "Mod+N"})
+
+    def test_shortcut_value_truncated(self):
+        self.path.write_text(
+            json.dumps({"shortcuts": {"in_app": {"x" * 40: "Mod+" + "A" * 80}}}),
+            encoding="utf-8",
+        )
+        data = self.client.get("/api/prefs").json()
+        (key, value), = data["shortcuts"]["in_app"].items()
+        self.assertEqual(len(key), 32)
+        self.assertEqual(len(value), 64)
