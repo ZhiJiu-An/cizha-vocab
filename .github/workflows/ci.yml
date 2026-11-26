@@ -68,6 +68,10 @@ jobs:
       - name: 安装依赖
         run: npm ci --no-audit --no-fund
 
+      # 放在构建之前：逻辑错了先暴露，不必等一个「构建成功但行为错」的产物
+      - name: 单元测试（vitest）
+        run: npm run test
+
       - name: 构建
         run: npm run build
 
