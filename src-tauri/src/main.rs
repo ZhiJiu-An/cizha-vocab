@@ -987,8 +987,11 @@ fn hide_background_main_window<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// 诊断：记录前台应用 PID 与 main / quick / shot 的可见、聚焦状态。
-/// 仅用于定位窗口激活问题，输出到 screen.log。
+/// 仅在设置 `CIZHA_DEBUG_WINDOWS=1` 时输出，避免生产日志噪音。
 fn log_wins<R: Runtime>(app: &AppHandle<R>, tag: &str) {
+    if std::env::var("CIZHA_DEBUG_WINDOWS").ok().as_deref() != Some("1") {
+        return;
+    }
     let state = |label: &str| match app.get_webview_window(label) {
         Some(w) => format!(
             "{label}[v{} f{}]",
@@ -1268,7 +1271,6 @@ fn permission_payload(needs_settings: bool) -> QuickPayload {
 }
 
 /// 屏幕录制权限的三态：已生效 / 已申请但当前进程未生效 / 未授权
-#[allow(dead_code)]
 enum ScreenAccess {
     Granted,
     PendingRestart,
@@ -1296,10 +1298,17 @@ fn log_screen_event(message: &str) {
     };
     let dir = PathBuf::from(home).join("Library/Logs/com.cizha.vocab");
     let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("screen.log");
+    // 超过 5MB 轮转为 screen.log.1，只保留一份，避免长期使用无限增长。
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > 5 * 1024 * 1024 {
+            let _ = std::fs::rename(&path, dir.join("screen.log.1"));
+        }
+    }
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join("screen.log"))
+        .open(&path)
     {
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
