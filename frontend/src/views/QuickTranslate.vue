@@ -81,8 +81,9 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { extractWordsFromImage, lookupDictionary } from '../api'
-import { looksLikeSentence, stripTranslationMarker } from '../utils'
+import { looksLikeSentence } from '../utils'
 import { prefs } from '../utils/prefs'
+import { streamTranslate as streamTranslation, trimIncomplete } from '../utils/stream'
 import { effectiveInAppShortcuts, matchesCombo } from '../utils/shortcuts'
 
 // 同一份前端也会跑在浏览器里（npm run dev），非 Tauri 环境下 IPC 一律跳过
@@ -155,22 +156,6 @@ async function loadDictionary(word) {
   }
 }
 
-/* ===== 流式解析：与搜索页保持同一套五段格式 ===== */
-function parseSections(raw) {
-  const marks = []
-  const re = /【(定名|展开|详解|例句|译文)】/g
-  let m
-  while ((m = re.exec(raw))) marks.push({ key: m[1], index: m.index, end: re.lastIndex })
-  return marks.map((mark, i) => ({
-    key: mark.key,
-    text: raw.slice(mark.end, i + 1 < marks.length ? marks[i + 1].index : undefined),
-  }))
-}
-
-function trimIncomplete(text) {
-  return (text || '').replace(/【[^】]*$/, '').trim()
-}
-
 /* ===== 输入翻译 ===== */
 async function doTranslate() {
   const word = keyword.value.trim()
@@ -194,52 +179,15 @@ async function doTranslate() {
   sections.value = []
   loading.value = true
   streaming.value = true
-  let raw = ''
-  // 整句 / 整段走通用翻译；前端按纯文本渲染，不依赖模型输出【译文】标记
-  const general = looksLikeSentence(word)
 
   try {
-    const preset = general ? '?preset=general' : ''
-    const resp = await fetch(`/api/translate/${encodeURIComponent(word)}${preset}`, {
+    await streamTranslation(word, {
+      preset: prefs.translate_preset || '',
       signal: abortCtrl.signal,
+      onDelta: (_, next) => {
+        if (seq === streamSeq) sections.value = next
+      },
     })
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}))
-      throw new Error(data.detail || `翻译请求失败 (${resp.status})`)
-    }
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (seq !== streamSeq) return
-      buf += decoder.decode(value, { stream: true })
-      const events = buf.split('\n\n')
-      buf = events.pop()
-      for (const ev of events) {
-        const line = ev.trim()
-        if (!line.startsWith('data:')) continue
-        const payload = line.slice(5).trim()
-        if (payload === '[DONE]') continue
-        let obj
-        try {
-          obj = JSON.parse(payload)
-        } catch {
-          continue
-        }
-        if (obj.error) throw new Error(obj.error)
-        const delta = obj.choices?.[0]?.delta?.content || ''
-        if (delta) {
-          raw += delta
-          sections.value = general
-            ? raw.trim()
-              ? [{ key: '译文', text: stripTranslationMarker(raw) }]
-              : []
-            : parseSections(raw)
-        }
-      }
-    }
   } catch (e) {
     if (e.name !== 'AbortError' && seq === streamSeq) {
       error.value = e.message || '翻译失败'

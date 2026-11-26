@@ -252,8 +252,9 @@ import {
   findLocalWord,
   getPromptPresets,
 } from '../api'
-import { looksLikeSentence, parseTags, stripTranslationMarker, toast } from '../utils'
+import { parseTags, toast } from '../utils'
 import { prefs } from '../utils/prefs'
+import { streamTranslate as streamTranslation, trimIncomplete } from '../utils/stream'
 
 const route = useRoute()
 
@@ -427,21 +428,6 @@ const SECTION_META = {
   '详解': { label: '领域详解', tagCls: 'tag-domain', textCls: 'domain' },
 }
 
-function parseSections(raw) {
-  const marks = []
-  const re = /【(定名|展开|详解|例句|译文)】/g
-  let m
-  while ((m = re.exec(raw))) marks.push({ key: m[1], index: m.index, end: re.lastIndex })
-  return marks.map((mark, i) => ({
-    key: mark.key,
-    text: raw.slice(mark.end, i + 1 < marks.length ? marks[i + 1].index : undefined),
-  }))
-}
-
-function trimIncomplete(text) {
-  return (text || '').replace(/【[^】]*$/, '').trim()
-}
-
 const sectionMap = computed(() => {
   const map = {}
   for (const s of llmSections.value) map[s.key] = trimIncomplete(s.text)
@@ -543,48 +529,14 @@ async function streamTranslate(word) {
   llmError.value = ''
   llmStreaming.value = true
   streamDone.value = false
-  let raw = ''
-  // 明确选了领域就尊重选择；否则整句自动走通用翻译
-  const presetKey = translatePreset.value || (looksLikeSentence(word) ? 'general' : '')
-  const general = presetKey === 'general'
   try {
-    const preset = presetKey ? `?preset=${encodeURIComponent(presetKey)}` : ''
-    const resp = await fetch(`/api/translate/${encodeURIComponent(word)}${preset}`, {
+    await streamTranslation(word, {
+      preset: translatePreset.value,
       signal: abortCtrl.signal,
+      onDelta: (_, next) => {
+        if (seq === llmSeq) llmSections.value = next
+      },
     })
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}))
-      throw new Error(data.detail || `翻译请求失败 (${resp.status})`)
-    }
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (seq !== llmSeq) return
-      buf += decoder.decode(value, { stream: true })
-      const events = buf.split('\n\n')
-      buf = events.pop()
-      for (const ev of events) {
-        const line = ev.trim()
-        if (!line.startsWith('data:')) continue
-        const payload = line.slice(5).trim()
-        if (payload === '[DONE]') continue
-        let obj
-        try { obj = JSON.parse(payload) } catch { continue }
-        if (obj.error) throw new Error(obj.error)
-        const delta = obj.choices?.[0]?.delta?.content || ''
-        if (delta) {
-          raw += delta
-          llmSections.value = general
-            ? raw.trim()
-              ? [{ key: '译文', text: stripTranslationMarker(raw) }]
-              : []
-            : parseSections(raw)
-        }
-      }
-    }
     if (seq === llmSeq) streamDone.value = true
   } catch (e) {
     if (e.name === 'AbortError' || seq !== llmSeq) return
