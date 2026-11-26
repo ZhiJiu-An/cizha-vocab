@@ -51,8 +51,20 @@ def resolve_spa_path(full_path: str, dist_root: Path) -> Path | None:
     return target if target.is_file() else None
 
 
+# 一次性数据回填的迁移记录（P2-1）：schema_meta 每条记录对应一个命名迁移，value 是版本号。
+# 存量库没有这张表 → 视为未迁移；标记与回填在同一事务内，失败不会留下「已完成」。
+DATA_BACKFILL_KEY = "data_backfill"
+DATA_BACKFILL_VERSION = 1
+
+
 def _migrate():
-    """SQLite 轻量迁移：给已有 words 表补 v0.5 复习列（幂等，不引 alembic）"""
+    """SQLite 轻量迁移（幂等，不引 alembic）
+
+    分两类：
+    - 结构补齐（补列 / 建索引）每次启动都执行，保证任何时刻都能修好老库；
+    - 数据回填（补齐复习日期 + 标签归一）是 O(行数) 的全表读，只执行一次，
+      执行记录写在 schema_meta 里，避免每次启动都白扫一遍全表。
+    """
     from sqlalchemy import text
 
     from .common import normalize_tags
@@ -65,18 +77,33 @@ def _migrate():
         "in_review": "INTEGER DEFAULT 1",
     }
     with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS schema_meta ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        ))
         existing = {row[1] for row in conn.execute(text("PRAGMA table_info(words)"))}
         for col, ddl in new_columns.items():
             if col not in existing:
                 conn.execute(text(f"ALTER TABLE words ADD COLUMN {col} {ddl}"))
-        # 存量词条：复习日期置为当天（新词当天即到期）
-        conn.execute(text(
-            "UPDATE words SET next_review_at = date('now') WHERE next_review_at IS NULL"
-        ))
         # 复习队列索引（P2-3）：in_review 参与 /review 的全部查询，旧库没有这个索引。
         # 新库由 create_all 依据 models 的 index=True 自动建，这里只补存量库（幂等）。
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_words_in_review ON words (in_review)"
+        ))
+
+        done = conn.execute(
+            text("SELECT value FROM schema_meta WHERE key = :key"),
+            {"key": DATA_BACKFILL_KEY},
+        ).scalar()
+        if done is not None:
+            try:
+                if int(done) >= DATA_BACKFILL_VERSION:
+                    return
+            except (TypeError, ValueError):
+                pass   # 脏值按「未迁移」处理，宁可多跑一次也不跳过
+        # 存量词条：复习日期置为当天（新词当天即到期）
+        conn.execute(text(
+            "UPDATE words SET next_review_at = date('now') WHERE next_review_at IS NULL"
         ))
         # 存量标签归一（P0-5）：把 "大模型, RAG" 统一成 "大模型,RAG"，
         # 否则按「,tag,」边界精确匹配会漏掉带空格的历史标签
@@ -89,6 +116,10 @@ def _migrate():
                     text("UPDATE words SET tags = :tags WHERE id = :id"),
                     {"tags": normalized, "id": word_id},
                 )
+        conn.execute(
+            text("INSERT OR REPLACE INTO schema_meta (key, value) VALUES (:key, :value)"),
+            {"key": DATA_BACKFILL_KEY, "value": str(DATA_BACKFILL_VERSION)},
+        )
 
 
 _migrate()

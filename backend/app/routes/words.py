@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
-from sqlalchemy import func, or_
+from sqlalchemy import func, insert, or_
 from sqlalchemy.orm import Session
 
 from ..common import (
@@ -170,6 +170,10 @@ def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
     仅 abbreviation 和 my_meaning 必填；已存在的词条自动跳过。
     旧版 10 / 11 列（无 note / 无复习进度）的 CSV 仍可直接导入，缺失列按默认值补齐。
     v0.14：限 10MB（与 OCR 同口径），只读到上限 +1 字节即停，不整体读入。
+
+    P2-2：整批判重 + 单次写入。旧实现每行发一次 SELECT 并 flush 一次，
+    5000 行就是近 5000 次查询；这里先把现有缩写一次性载入内存集合，
+    再一次性批量插入（executemany + RETURNING），最后提交。
     """
     raw = file.file.read(MAX_CSV_SIZE + 1)
     if len(raw) > MAX_CSV_SIZE:
@@ -177,7 +181,12 @@ def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
     content = raw.decode("utf-8-sig")
     reader = csv.reader(io.StringIO(content))
 
-    created = []
+    # 用 SQL 的 lower() 而不是 Python 的 .lower() 兜存量：SQLite 只折叠 ASCII，
+    # 与旧实现逐行 func.lower(...) == x.lower() 的口径完全一致，避免行为漂移。
+    existing = {
+        key for (key,) in db.query(func.lower(Word.abbreviation)).all() if key is not None
+    }
+    pending = []
     for idx, row in enumerate(reader):
         if not row or not row[0].strip():
             continue
@@ -193,22 +202,28 @@ def batch_import(file: UploadFile = File(...), db: Session = Depends(get_db)):
         if not data["my_meaning"]:
             continue
 
-        exists = (db.query(Word)
-                  .filter(func.lower(Word.abbreviation) == data["abbreviation"].lower())
-                  .first())
-        if exists:
+        key = data["abbreviation"].lower()
+        if key in existing:
             continue
+        existing.add(key)   # 同一文件内重复时保留第一条
 
         data["has_abbr"] = _derive_has_abbr(data["full_name"])
         data = _parse_review_fields(data)  # 有进度列则恢复，没有则按新词默认值
-        word = Word(**data)
-        db.add(word)
-        db.flush()
-        created.append(word)
+        pending.append(data)
 
+    if not pending:
+        return []
+
+    # 用 Core 的批量插入而不是 add_all + flush：ORM flush 实测是逐条 INSERT（5000 行
+    # 就是 5000 条语句），而这里一次 executemany 就能带 RETURNING 拿回 id 与全部列。
+    # 顺带避开了「commit 后实例过期、序列化时逐条回查」的老问题。
+    rows = db.execute(
+        insert(Word.__table__).returning(*Word.__table__.c), pending
+    ).all()
     db.commit()
-    for w in created:
-        db.refresh(w)
+    created = sorted(
+        (WordResponse.model_validate(row) for row in rows), key=lambda word: word.id
+    )
     return created
 
 

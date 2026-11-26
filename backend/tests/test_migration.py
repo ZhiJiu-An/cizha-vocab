@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.pool import StaticPool
 
 import app.main as main
@@ -50,6 +50,39 @@ class MigrateTestBase(unittest.TestCase):
     def run_migrate(self):
         with patch.object(main, "engine", self.engine):
             main._migrate()
+
+    def table_names(self):
+        with self.engine.begin() as conn:
+            return {
+                r[0] for r in conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table'")
+                )
+            }
+
+    def meta(self):
+        """schema_meta 的内容；表还不存在时返回空字典"""
+        if "schema_meta" not in self.table_names():
+            return {}
+        with self.engine.begin() as conn:
+            return {
+                r[0]: r[1]
+                for r in conn.execute(text("SELECT key, value FROM schema_meta"))
+            }
+
+    def select_from_words(self):
+        """跑一次 _migrate，返回期间所有对 words 的 select 语句"""
+        statements = []
+
+        def capture(_conn, _cursor, statement, _params, _context, _many):
+            statements.append(statement)
+
+        event.listen(self.engine, "before_cursor_execute", capture)
+        self.addCleanup(event.remove, self.engine, "before_cursor_execute", capture)
+        self.run_migrate()
+        return [
+            s for s in statements
+            if "from words" in s.lower() and s.lower().lstrip().startswith("select")
+        ]
 
 
 class TestTagMigration(MigrateTestBase):
@@ -107,6 +140,88 @@ class TestReviewQueueIndex(MigrateTestBase):
         self.run_migrate()
         self.run_migrate()
         self.assertIn("ix_words_in_review", self.index_names())
+
+
+class TestBackfillGate(MigrateTestBase):
+    """P2-1：一次性数据回填只在首次启动执行，之后靠 schema_meta 跳过"""
+
+    def test_first_run_creates_marker(self):
+        self.assertNotIn("schema_meta", self.table_names())
+        self.run_migrate()
+        self.assertEqual(
+            self.meta(),
+            {main.DATA_BACKFILL_KEY: str(main.DATA_BACKFILL_VERSION)},
+        )
+
+    def test_second_run_does_not_scan_words(self):
+        self.insert_raw("w1", " a , b ")
+        self.run_migrate()          # 第一次：完成回填并写标记
+        self.assertEqual(self.select_from_words(), [])
+
+    def test_second_run_keeps_later_writes_untouched(self):
+        """标记存在时不再归一：事后写进去的脏标签保持原样，证明确实跳过了"""
+        self.run_migrate()
+        self.insert_raw("w2", " c , d ")
+        self.run_migrate()
+        self.assertEqual(self.tags(), [" c , d "])
+
+    def test_missing_marker_table_is_treated_as_unmigrated(self):
+        """老库没有 schema_meta 表：照样完整迁移一次并补上标记"""
+        self.insert_raw("w1", " a , b ")
+        self.assertNotIn("schema_meta", self.table_names())
+
+        self.run_migrate()
+        self.assertEqual(self.tags(), ["a,b"])
+        self.assertEqual(
+            self.meta(),
+            {main.DATA_BACKFILL_KEY: str(main.DATA_BACKFILL_VERSION)},
+        )
+
+    def test_older_marker_version_reruns_backfill(self):
+        self.run_migrate()
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE schema_meta SET value = '0' WHERE key = :key"),
+                {"key": main.DATA_BACKFILL_KEY},
+            )
+        self.insert_raw("w2", " e , f ")
+
+        self.run_migrate()
+        self.assertEqual(self.tags(), ["e,f"])
+
+    def test_structure_is_still_fixed_with_marker(self):
+        """结构补齐不受闸门影响：标记已存在时缺索引仍会补回来"""
+        self.run_migrate()
+        with self.engine.begin() as conn:
+            conn.execute(text("DROP INDEX IF EXISTS ix_words_in_review"))
+
+        self.run_migrate()
+        self.assertIn("ix_words_in_review", self.index_names())
+
+
+class TestFailedBackfill(MigrateTestBase):
+    """P2-1：回填与标记同一事务，失败不留标记、下次可以重试"""
+
+    def fail_backfill(self):
+        with patch("app.common.normalize_tags", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.run_migrate()
+
+    def test_failure_leaves_no_marker(self):
+        self.insert_raw("w1", " a , b ")
+        self.fail_backfill()
+        self.assertEqual(self.meta(), {})
+
+    def test_retry_after_failure_succeeds(self):
+        self.insert_raw("w1", " a , b ")
+        self.fail_backfill()
+
+        self.run_migrate()
+        self.assertEqual(self.tags(), ["a,b"])
+        self.assertEqual(
+            self.meta(),
+            {main.DATA_BACKFILL_KEY: str(main.DATA_BACKFILL_VERSION)},
+        )
 
 
 class TestLegacyDbFileMigration(unittest.TestCase):

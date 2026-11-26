@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 import shutil
@@ -68,11 +68,34 @@ else:
 # 报 "unable to open database file"。create_engine 本身不会建目录。
 os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)) or DATA_DIR, exist_ok=True)
 
+# 单次写锁等待上限（毫秒）。SQLite 默认 0 = 立刻抛 database is locked，
+# 看护线程重启后端的窗口期内若有残留连接持锁，就会直接失败。
+BUSY_TIMEOUT_MS = 5000
+
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
     connect_args={"check_same_thread": False},  # SQLite 多线程需要
     pool_pre_ping=True,                          # 连接失效自动重建，长跑更稳
 )
+
+
+def apply_sqlite_pragmas(dbapi_connection, _connection_record=None):
+    """每条新连接建立时设置 PRAGMA（P2-3）
+
+    journal_mode=WAL 会写进库文件头，是持久设置，重复执行无副作用；
+    busy_timeout 却是**每连接**设置，只能挂在 connect 事件上 —— 只在引擎创建后
+    手动跑一次的话，连接池新建的连接会退回默认 0，并发写照样立刻报错。
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.fetchone()   # 该 PRAGMA 会返回一行结果，取掉避免遗留未读结果集
+        cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    finally:
+        cursor.close()
+
+
+event.listen(engine, "connect", apply_sqlite_pragmas)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

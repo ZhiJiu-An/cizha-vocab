@@ -166,6 +166,62 @@ class TestCsv(ApiTestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
 
 
+class TestCsvImportBatching(ApiTestCase):
+    """P2-2：导入改为整批判重 + 单次写入，去重语义必须原样保留"""
+
+    HEADER = (
+        "abbreviation,full_name,cn_term,my_meaning,domain_detail,"
+        "phonetic_uk,phonetic_us,api_meaning,examples,tags\n"
+    )
+
+    def import_csv(self, body):
+        resp = self.client.post(
+            "/api/words/batch", files={"file": ("x.csv", body.encode(), "text/csv")}
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()
+
+    def test_duplicate_rows_in_same_file_keep_first(self):
+        created = self.import_csv(
+            self.HEADER + "dup,,,第一条,,,,,[],\ndup,,,第二条,,,,,[],\n"
+        )
+        self.assertEqual([w["abbreviation"] for w in created], ["dup"])
+        self.assertEqual(created[0]["my_meaning"], "第一条")
+
+    def test_existing_word_is_skipped_case_insensitively(self):
+        self.create_word("Rag", my_meaning="原有释义")
+        created = self.import_csv(self.HEADER + "rag,,,导入释义,,,,,[],\n")
+        self.assertEqual(created, [])
+        self.assertEqual(self.list_words(keyword="rag")["items"][0]["my_meaning"], "原有释义")
+
+    def test_large_import_keeps_statement_count_constant(self):
+        """5000 行的查询 / 写入次数必须是常数，不随行数增长"""
+        from sqlalchemy import event
+
+        engine = self.SessionLocal.engine
+        statements = []
+
+        def capture(_conn, _cursor, statement, _params, _context, _many):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            body = self.HEADER + "".join(f"w{i},,,释义{i},,,,,[]\n" for i in range(5000))
+            created = self.import_csv(body)
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+        self.assertEqual(len(created), 5000)
+        selects = [
+            s for s in statements
+            if s.lower().lstrip().startswith("select") and "from words" in s.lower()
+        ]
+        inserts = [s for s in statements if s.lower().lstrip().startswith("insert")]
+        self.assertEqual(len(selects), 1, selects[:3])   # 只有一次预载缩写
+        # 分块批量写入：语句数必须远小于行数（旧实现是每行一条）
+        self.assertLess(len(inserts), len(created) // 10, inserts[:3])
+
+
 class TestKeywordEscaping(ApiTestCase):
     """P0-7：关键词里的 LIKE 通配符必须按字面处理"""
 
