@@ -143,4 +143,4 @@ def get_app_version() -> str:
         from .main import APP_VERSION  # noqa: WPS433 —— 延迟 import 避免循环
         return APP_VERSION
     except (ImportError, AttributeError):
-        return "0.2.3"
+        return "0.2.4"

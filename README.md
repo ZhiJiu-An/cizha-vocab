@@ -6,19 +6,19 @@
 
 面向 AI / 大模型从业者的英文术语记录本 · **原生 macOS App**
 
-[![Version](https://img.shields.io/badge/version-v0.2.3-34674f?style=flat-square)](https://github.com/ZhiJiu-An/cizha-vocab/releases/latest)
+[![Version](https://img.shields.io/badge/version-v0.2.4-34674f?style=flat-square)](https://github.com/ZhiJiu-An/cizha-vocab/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=flat-square&logo=apple)](https://github.com/ZhiJiu-An/cizha-vocab/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri)](https://tauri.app/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Vue](https://img.shields.io/badge/Vue-3.5-42B883?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
-[![Tests](https://img.shields.io/badge/tests-216%20passed-34674f?style=flat-square)](backend/tests)
+[![Tests](https://img.shields.io/badge/tests-283%20passed-34674f?style=flat-square)](backend/tests)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](LICENSE)
 
 <br>
 
-<a href="https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.3/cizha-vocab-v0.2.3-macos-arm64.dmg">
-  <strong>⬇️ 下载词札 for macOS Apple Silicon (.dmg · 31 MB)</strong>
+<a href="https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.4/cizha-vocab-v0.2.4-macos-arm64.dmg">
+  <strong>⬇️ 下载词札 for macOS Apple Silicon (.dmg · 30 MB)</strong>
 </a>
 
 </div>
@@ -52,9 +52,9 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS Apple Silicon | [cizha-vocab-v0.2.3-macos-arm64.dmg](https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.3/cizha-vocab-v0.2.3-macos-arm64.dmg) | 约 31 MB · macOS 12.0+ |
+| macOS Apple Silicon | [cizha-vocab-v0.2.4-macos-arm64.dmg](https://github.com/ZhiJiu-An/cizha-vocab/releases/download/v0.2.4/cizha-vocab-v0.2.4-macos-arm64.dmg) | 约 30 MB · macOS 12.0+ |
 | macOS Intel | 源码构建 | 见下方 [快速开始](#快速开始) |
-| PyInstaller 三平台二进制 | [Releases 页面](https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.2.3) | darwin-arm64 / linux-amd64 / windows-amd64 |
+| PyInstaller 三平台二进制 | [Releases 页面](https://github.com/ZhiJiu-An/cizha-vocab/releases/tag/v0.2.4) | darwin-arm64 / linux-amd64 / windows-amd64 |
 
 **首次打开说明**：macOS 安全机制会弹出「无法打开 — 无法验证开发者」。右键词札 → 打开 → 再点打开即可，之后双击正常。
 
@@ -110,7 +110,7 @@
 
 - 六档间隔：1 / 2 / 4 / 7 / 15 / 30 天
 - 3D 翻卡 + 三档自评：记住 / 模糊 / 忘记
-- 到期队列、标签筛选、错词优先排序
+- 到期队列、标签筛选，队列统一按到期时间排序
 - 错词本聚合历史「忘记」次数
 - 到点学习提醒：页面后台走系统通知，前台走应用内提示
 
@@ -128,6 +128,14 @@
 - 四套领域提示词预设（大模型 / 计算机 / 医学 / 金融）+ 自定义
 - 提示词强制包含 `{word}` 与五段标记
 
+### 桌面快捷操作
+
+- `⌘⇧C` 唤起 / 隐藏主窗口，`⌥A` 输入翻译，`⌥S` 截图取词（框选后识别原文直接填入输入框，可编辑再查）
+- 快查浮窗同时给出「词典释义」与「大模型翻译」两段，整句自动走通用译文
+- 主窗口搜索框右侧可切换领域提示词（默认 / 大模型 / 软件工程 / 医学 / 金融），选择随偏好持久化
+- 局内快捷键（搜索 / 新建 / 页面切换 / 保存 / 复习自评等）与全局快捷键均可在设置页录制改绑，冲突与系统保留键会被拦下
+- 关闭窗口即隐藏到托盘，托盘菜单可退出；后端崩溃会自动重启并换端口，界面无感恢复
+
 ---
 
 ## 技术栈
@@ -138,7 +146,7 @@
 | 前端 | Vue 3（`<script setup>`）· Vue Router · Vite · Axios |
 | 词典 | 有道词典 jsonapi |
 | 大模型 | OpenAI 兼容接口 · SSE 流式 |
-| 测试 | Python 标准库 `unittest`（内存 SQLite 隔离） |
+| 测试 | 后端 Python `unittest`（内存 SQLite 隔离）· 前端 vitest（纯函数，不测组件渲染） |
 | 代码质量 | ruff · GitHub Actions |
 
 ---
@@ -351,19 +359,22 @@ cizha-vocab/
 ```bash
 cd backend
 
-# 单元测试（219 个）
+# 后端单元测试（全量）
 ./venv/bin/python -m unittest discover -s tests -t . -v
 
 # 代码风格
 ruff check app tests
 
+# 前端纯函数单测（vitest）
+cd ../frontend && npm run test
+
 # 前端构建验证
-cd ../frontend && npm run build
+npm run build
 ```
 
 - 每个测试用例使用独立的内存 SQLite，不会改动真实数据
 - 测试入口会在导入应用前把 `CIZHA_DB_PATH` 指向临时文件
-- CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)：推送 `main` 或提交 PR 时自动执行 ruff + 全量测试
+- CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)：推送 `main` 或提交 PR 时自动执行 ruff + 后端全量测试 + 前端单测与构建
 
 详细覆盖范围见 [backend/tests/README.md](backend/tests/README.md)。
 
