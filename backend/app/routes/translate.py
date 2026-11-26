@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..config import build_prompt, get_text_model
+from ..config import build_prompt, get_text_model, resolve_prompt
 
 router = APIRouter(prefix="/api/translate", tags=["大模型翻译"])
 
@@ -24,8 +24,12 @@ def _error_event(message: str) -> str:
 
 
 @router.get("/{word}")
-async def translate(word: str):
-    """大模型领域翻译，SSE 流式返回"""
+async def translate(word: str, preset: str | None = None):
+    """大模型领域翻译，SSE 流式返回
+
+    `preset` 可选：主窗口搜索框切换领域时传 llm / cs / medical / finance，
+    覆盖模型卡上保存的提示词；不传或未知值则用模型卡自己的提示词。
+    """
     word = word.strip()
     if not word:
         raise HTTPException(status_code=400, detail="单词不能为空")
@@ -37,10 +41,11 @@ async def translate(word: str):
             detail="大模型未配置：请在「设置 → 模型配置」里添加一个文本模型并设为默认",
         )
 
+    prompt = resolve_prompt(card["prompt"], preset)
     payload = {
         "model": card["model"],
         "stream": True,
-        "messages": [{"role": "user", "content": build_prompt(word, card["prompt"])}],
+        "messages": [{"role": "user", "content": build_prompt(word, prompt)}],
     }
     headers = {"Authorization": f"Bearer {card['api_key']}"}
 

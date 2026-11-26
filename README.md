@@ -330,7 +330,7 @@ cizha-vocab/
 │   │   ├── schemas.py         # Pydantic 模型
 │   │   ├── config.py          # 运行时模型配置
 │   │   └── routes/            # words / dictionary / translate / review / stats / ocr / llm_config
-│   ├── tests/                 # 202 个单元测试
+│   ├── tests/                 # 219 个单元测试
 │   └── data/                  # 运行时数据（gitignore）
 ├── frontend/
 │   └── src/
@@ -351,7 +351,7 @@ cizha-vocab/
 ```bash
 cd backend
 
-# 单元测试（202 个）
+# 单元测试（219 个）
 ./venv/bin/python -m unittest discover -s tests -t . -v
 
 # 代码风格

@@ -7,6 +7,19 @@
 
 ### 新增
 
+- **截图选区层增加壳层兜底关闭**
+  - 选区层显示时再次按 `⌥S` 立即关闭，不再发起新的截图
+  - 选区层保持不抢焦点，Esc 由壳层临时接管；取消后迟到的拖拽提交会被忽略
+  - 无操作 60 秒后由壳层自动关闭，避免页面脚本失效时全屏置顶窗口卡住桌面
+  - 兜底关闭原因写入 `screen.log`
+
+- **截图取词改为「文字进输入框」**
+  - `⌥S` 截图识别后不再在快查浮窗展示图片，识别出的原文直接填入输入框、可编辑，再按普通查询流程给出领域翻译
+
+- **主窗口支持切换领域提示词**
+  - 搜索框右侧新增领域下拉（默认 / 大模型 / 软件工程 / 医学 / 金融），切换后用同一模型的不同提示词重新翻译
+  - 选择持久化到 `prefs.json` 的 `translate_preset`；新增 `GET /api/llm/presets`，翻译接口支持 `?preset=`
+
 - **设置页改为分类页签**
   - `/settings` 变成壳层页签（通用 / 模型 / 快捷键），子路由 `general`、`models`、`shortcuts`；旧的 `/settings/models` 深链保持可用
   - 通用页承接昵称、发音偏好、学习提醒；模型页保留原配置能力并迁入「配置小抄」
@@ -34,6 +47,15 @@
 
 ### 修复
 
+- **截图时不再把后台的词札主窗口顶到前台**
+  - 根因：点击透明选区层会让它取得焦点，macOS 随即激活词札，并把该应用所有可见窗口一起抬到前台
+  - 选区层打开前若主窗口可见但词札不在前台，先隐藏主窗口；截图结束或取消后保持隐藏，需要时从托盘 / Dock 召回
+
+- **截图取词只截到桌面 / 反复申请屏幕录制权限**
+  - 截图改为应用内原生实现：`⌥S` 创建全屏透明选区层（`/shot`），前端上报选区后用 `CGWindowListCreateImage` 取图、ImageIO 编码 PNG，**不再调用 `/usr/sbin/screencapture`**——子进程每次调用都会重新触发系统授权弹窗
+  - 截图前用 `CGPreflightScreenCaptureAccess` 预检；未授权时在快查浮窗给出明确指引，并新增「打开屏幕录制设置」按钮（`open_screen_recording_settings`）
+  - 每次启动最多主动申请一次授权，避免每次按 `⌥S` 都被系统弹窗打断；授权后需重启 App 生效
+- **macOS 产物启用 ad-hoc 自签**：`bundle.macOS.signingIdentity: "-"`，并关闭 hardened runtime（实测 ad-hoc + hardened runtime + entitlements 会 `EBADEXEC` 无法启动）。此前实际只有 linker 签名（无 `_CodeSignature`），TCC 无法稳定保存屏幕录制等授权，导致「允许后仍反复申请」
 - 前端由后端 `http://127.0.0.1:<端口>` 托管，Tauri 视其为 **remote 来源**：补齐 `capabilities/default.json` 的 `remote.urls`，并新增 `permissions/app.toml` 登记 `cizha-ipc` 允许的自定义命令
   - 修复快捷键设置页全局快捷键不显示（`Command get_global_shortcuts not allowed by ACL`）
   - 修复快查浮窗 `listen` / `quick_get_pending` 被拒导致输入与截图取词均无结果

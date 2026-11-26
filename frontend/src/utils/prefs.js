@@ -13,6 +13,7 @@ const LEGACY_KEY = 'danciji_prefs'   // v0.14 前的 key，只读兼容，避免
 const defaults = {
   nickname: '词札学习者',
   accent: 'us', // us / uk
+  translate_preset: '', // 主窗口领域提示词：llm / cs / medical / finance，空 = 默认
   reminder: { enabled: false, time: '20:00', last_notified: '' },
   // 应用内快捷键：动作 ID -> 组合键。"Mod" = macOS ⌘ / Windows·Linux Ctrl
   shortcuts: { in_app: {} },

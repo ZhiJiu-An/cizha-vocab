@@ -10,7 +10,12 @@
     </header>
 
     <div class="q-body">
-      <div v-if="error" class="q-error">{{ error }}</div>
+      <div v-if="error" class="q-error">
+        <span>{{ error }}</span>
+        <button v-if="needsPermission" class="q-error-act" @click="openScreenRecordingSettings">
+          打开屏幕录制设置
+        </button>
+      </div>
 
       <!-- 输入翻译 -->
       <div v-if="mode === 'text'" class="q-search">
@@ -27,11 +32,8 @@
         </button>
       </div>
 
-      <!-- 截图取词：预览 + 识别中 -->
-      <div v-if="mode === 'image' && imageUrl" class="q-shot">
-        <img :src="imageUrl" alt="截图预览">
-        <span v-if="ocrLoading" class="q-shot-mask">识别中…</span>
-      </div>
+      <!-- 截图取词：不再展示图片，识别完成后文字直接进输入框 -->
+      <div v-if="ocrLoading" class="q-dict-hint">正在识别截图中的文字…</div>
 
       <!-- 词典释义：命中的词/短语才显示；未收录时不占位，只保留大模型翻译 -->
       <div v-if="dictLoading || (dict && dict.found)" class="q-dict">
@@ -60,25 +62,8 @@
         <span v-if="streaming" class="q-cursor">▍</span>
       </div>
 
-      <!-- 截图取词结果 -->
-      <div v-if="ocrTranslation" class="q-trans">
-        <span class="q-trans-label">译文</span>
-        <span>{{ ocrTranslation }}</span>
-      </div>
-      <div v-if="ocrWords.length" class="q-chips">
-        <button
-          v-for="w in ocrWords"
-          :key="w.word"
-          class="q-chip"
-          :title="w.zh || `查询「${w.word}」`"
-          @click="openInMain(w.word)"
-        >
-          {{ w.word }}<em v-if="w.zh">{{ w.zh }}</em>
-        </button>
-      </div>
-
       <div v-if="isEmpty" class="q-empty">
-        {{ mode === 'image' ? '截图已就绪，正在等待识别结果…' : '输入一个词，回车看领域翻译。' }}
+        输入单词或句子，回车翻译。
       </div>
     </div>
 
@@ -96,6 +81,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { extractWordsFromImage, lookupDictionary } from '../api'
+import { looksLikeSentence, stripTranslationMarker } from '../utils'
 import { prefs } from '../utils/prefs'
 import { effectiveInAppShortcuts, matchesCombo } from '../utils/shortcuts'
 
@@ -105,7 +91,8 @@ const isTauri = Boolean(window.__TAURI_INTERNALS__)
 const mode = ref('text')
 const keyword = ref('')
 const error = ref('')
-const imageUrl = ref('')
+// 截图取词缺少「屏幕录制」权限时，错误块里给出直达系统设置的按钮
+const needsPermission = ref(false)
 const inputRef = ref(null)
 
 const loading = ref(false)
@@ -114,14 +101,12 @@ const sections = ref([])
 const currentWord = ref('')
 
 const ocrLoading = ref(false)
-const ocrTranslation = ref('')
-const ocrWords = ref([])
 
 const dict = ref(null)
 const dictLoading = ref(false)
 const dictError = ref('')
 
-const SECTION_META = { 定名: '中文定名', 展开: '缩写展开', 详解: '领域详解' }
+const SECTION_META = { 译文: '通用译文', 定名: '中文定名', 展开: '缩写展开', 详解: '领域详解' }
 
 let lastPayloadId = 0
 let streamSeq = 0
@@ -133,7 +118,7 @@ const visibleSections = computed(() => {
   const map = {}
   for (const s of sections.value) map[s.key] = trimIncomplete(s.text)
   const out = []
-  for (const key of ['定名', '展开', '详解']) {
+  for (const key of ['译文', '定名', '展开', '详解']) {
     const text = map[key]
     if (text && text !== '无') out.push({ key, label: SECTION_META[key], text })
   }
@@ -144,7 +129,6 @@ const isEmpty = computed(
   () =>
     !error.value &&
     !visibleSections.value.length &&
-    !ocrTranslation.value &&
     !ocrLoading.value &&
     !loading.value &&
     !dictLoading.value &&
@@ -192,11 +176,17 @@ async function doTranslate() {
   const word = keyword.value.trim()
   if (!word || loading.value) return
   error.value = ''
+  needsPermission.value = false
   currentWord.value = word
-  ocrTranslation.value = ''
-  ocrWords.value = []
-  imageUrl.value = ''
-  loadDictionary(word)
+  ocrLoading.value = false
+  // 整句不做词典查询：省一次往返，直接等通用译文
+  if (looksLikeSentence(word)) {
+    dict.value = null
+    dictLoading.value = false
+    dictError.value = ''
+  } else {
+    loadDictionary(word)
+  }
 
   abortCtrl?.abort()
   abortCtrl = new AbortController()
@@ -205,9 +195,12 @@ async function doTranslate() {
   loading.value = true
   streaming.value = true
   let raw = ''
+  // 整句 / 整段走通用翻译；前端按纯文本渲染，不依赖模型输出【译文】标记
+  const general = looksLikeSentence(word)
 
   try {
-    const resp = await fetch(`/api/translate/${encodeURIComponent(word)}`, {
+    const preset = general ? '?preset=general' : ''
+    const resp = await fetch(`/api/translate/${encodeURIComponent(word)}${preset}`, {
       signal: abortCtrl.signal,
     })
     if (!resp.ok) {
@@ -239,7 +232,11 @@ async function doTranslate() {
         const delta = obj.choices?.[0]?.delta?.content || ''
         if (delta) {
           raw += delta
-          sections.value = parseSections(raw)
+          sections.value = general
+            ? raw.trim()
+              ? [{ key: '译文', text: stripTranslationMarker(raw) }]
+              : []
+            : parseSections(raw)
         }
       }
     }
@@ -255,11 +252,9 @@ async function doTranslate() {
   }
 }
 
-/* ===== 截图取词 ===== */
+/* ===== 截图取词：识别结果直接写进输入框，再走普通查询流程 ===== */
 async function runOcr(dataUrl) {
   ocrLoading.value = true
-  ocrTranslation.value = ''
-  ocrWords.value = []
   dictSeq++
   dict.value = null
   dictLoading.value = false
@@ -268,14 +263,18 @@ async function runOcr(dataUrl) {
     const blob = await (await fetch(dataUrl)).blob()
     const file = new File([blob], 'screenshot.png', { type: blob.type || 'image/png' })
     const res = await extractWordsFromImage(file)
-    ocrTranslation.value = res.translation || ''
-    ocrWords.value = res.words || []
-    currentWord.value = res.original_text || ''
-    // 词典能收录这段原文（词/短语）时给出原文证据，否则只保留大模型翻译
-    loadDictionary(currentWord.value)
-    if (!ocrTranslation.value && !ocrWords.value.length) {
+    const text = (res.original_text || '').trim()
+    if (!text) {
       error.value = '未识别到文字，换个区域再试'
+      return
     }
+    // 图片不再展示：识别出的文字放进输入框，用户仍可编辑后再查
+    keyword.value = text
+    mode.value = 'text'
+    ocrLoading.value = false
+    await nextTick()
+    inputRef.value?.focus()
+    await doTranslate()
   } catch (e) {
     error.value = e.message || '图片识别失败'
   } finally {
@@ -294,9 +293,7 @@ async function applyPayload(payload) {
   sections.value = []
   keyword.value = ''
   error.value = payload.error || ''
-  ocrTranslation.value = ''
-  ocrWords.value = []
-  imageUrl.value = ''
+  needsPermission.value = Boolean(payload.needs_permission)
   currentWord.value = ''
   dictSeq++
   dict.value = null
@@ -305,8 +302,17 @@ async function applyPayload(payload) {
   loading.value = false
   streaming.value = false
 
+  // 壳层端上 OCR 已识别出文字：直接填入输入框并翻译，不再上传图片
+  if (payload.text) {
+    keyword.value = String(payload.text).trim()
+    mode.value = 'text'
+    await nextTick()
+    inputRef.value?.focus()
+    await doTranslate()
+    return
+  }
+
   if (payload.image) {
-    imageUrl.value = payload.image
     await runOcr(payload.image)
   }
 
@@ -330,6 +336,16 @@ async function hideSelf() {
     await invoke('quick_hide')
   } catch {
     /* 浮窗已不在时忽略 */
+  }
+}
+
+// 直达「系统设置 → 隐私与安全性 → 屏幕录制」，授权后需重启词札
+async function openScreenRecordingSettings() {
+  if (!isTauri) return
+  try {
+    await invoke('open_screen_recording_settings')
+  } catch (e) {
+    error.value = String(e)
   }
 }
 
@@ -419,7 +435,22 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 8px 10px;
   line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
+.q-error-act {
+  border: 1px solid #e0b98f;
+  background: #fff;
+  color: #9c4210;
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.q-error-act:hover { border-color: #b3541e; }
 
 .q-search {
   display: flex;
@@ -452,26 +483,6 @@ onUnmounted(() => {
   cursor: pointer;
 }
 .q-go:disabled { background: #c8d3ca; cursor: default; }
-
-.q-shot {
-  position: relative;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  max-height: 84px;
-  background: #fff;
-}
-.q-shot img { width: 100%; height: 84px; object-fit: cover; display: block; }
-.q-shot-mask {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.82);
-  font-size: 12px;
-  color: var(--primary);
-}
 
 .q-dict {
   background: #fff;
@@ -517,36 +528,6 @@ onUnmounted(() => {
 }
 .q-text { font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
 .q-cursor { color: var(--primary); font-size: 12px; }
-
-.q-trans {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text);
-  background: #f1f5f1;
-  border-radius: 8px;
-  padding: 8px 10px;
-  max-height: 92px;
-  overflow-y: auto;
-}
-.q-trans-label {
-  color: var(--primary);
-  font-size: 11px;
-  margin-right: 6px;
-}
-
-.q-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.q-chip {
-  border: 1px solid #dce7dd;
-  background: #fff;
-  color: var(--text);
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.q-chip:hover { border-color: var(--primary); color: var(--primary); }
-.q-chip em { font-style: normal; color: var(--muted); font-size: 11px; margin-left: 4px; }
 
 .q-empty { font-size: 12px; color: var(--muted); text-align: center; padding: 18px 0; }
 

@@ -8,4 +8,7 @@ commands.allow = [
   "get_global_shortcuts",
   "set_global_shortcut",
   "reset_global_shortcuts",
+  "open_screen_recording_settings",
+  "finish_region_shot",
+  "cancel_region_shot",
 ]

@@ -103,6 +103,9 @@ export const testModel = (data) =>
 export const setDefaultModel = (id) =>
   api.post(`/llm/models/${id}/default`).then((r) => r.data)
 
+// 领域提示词预设（主窗口搜索框的领域切换器）
+export const getPromptPresets = () => api.get('/llm/presets').then((r) => r.data)
+
 /* ========= 用户偏好 ========= */
 // 桌面版端口每次启动都变，localStorage 会丢；偏好统一走后端落盘。
 // 读偏好只在启动时做一次，超时压到 1.5s，后端异常时用本地缓存兜底。

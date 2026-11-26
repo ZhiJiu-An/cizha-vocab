@@ -23,6 +23,51 @@
         <button class="ocr-btn" :disabled="ocrLoading" @click="pickImage">
           {{ ocrLoading ? '识别中…' : '📷 图片取词' }}
         </button>
+        <!-- 领域提示词切换：同一模型，换一套领域语境 -->
+        <div ref="presetPickerRef" class="preset-picker">
+          <button
+            type="button"
+            class="preset-trigger"
+            :class="{ open: presetOpen }"
+            title="切换领域提示词"
+            @click="presetOpen = !presetOpen"
+          >
+            <span class="preset-mark"></span>
+            <span class="preset-current">{{ presetLabel || '默认领域' }}</span>
+            <svg class="preset-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+              <path
+                d="M1 3l4 4 4-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <div v-if="presetOpen" class="preset-menu">
+            <button
+              type="button"
+              class="preset-item"
+              :class="{ active: !translatePreset }"
+              @click="choosePreset('')"
+            >
+              <span>默认领域</span>
+              <em>模型配置里的提示词</em>
+            </button>
+            <button
+              v-for="p in presets"
+              :key="p.key"
+              type="button"
+              class="preset-item"
+              :class="{ active: translatePreset === p.key }"
+              @click="choosePreset(p.key)"
+            >
+              <span>{{ p.label }}</span>
+              <i v-if="translatePreset === p.key" class="preset-check">✓</i>
+            </button>
+          </div>
+        </div>
         <button class="primary" @click="doSearch">查找单词 ↗</button>
         <input ref="fileInput" type="file" accept="image/*" class="ocr-file" @change="onFileChange">
       </div>
@@ -133,7 +178,7 @@
 
         <!-- 右栏：大模型领域翻译 -->
         <div class="panel panel-llm">
-          <div class="panel-head">🤖 大模型 · 领域翻译</div>
+          <div class="panel-head">🤖 大模型 · {{ presetLabel || '领域翻译' }}</div>
           <div class="panel-body">
             <!-- 命中本地词库（v0.11）：展示自己的笔记，不再自动调大模型 -->
             <div v-if="localWord" class="local-hit">
@@ -197,17 +242,73 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Phonetics from '../components/Phonetics.vue'
-import { lookupDictionary, createWord, extractWordsFromImage, findLocalWord } from '../api'
-import { parseTags, toast } from '../utils'
+import {
+  lookupDictionary,
+  createWord,
+  extractWordsFromImage,
+  findLocalWord,
+  getPromptPresets,
+} from '../api'
+import { looksLikeSentence, parseTags, stripTranslationMarker, toast } from '../utils'
+import { prefs } from '../utils/prefs'
 
 const route = useRoute()
 
 const keyword = ref('')
 const searched = ref(false)
 const currentWord = ref('')
+
+/* ---------- 领域提示词切换（主窗口搜索框右侧） ----------
+   预设来自后端 config.PROMPT_PRESETS；选择会写进 prefs 持久化，
+   切换后若已有结果则用新领域重新翻译一次。 */
+const presets = ref([])
+const translatePreset = ref(prefs.translate_preset || '')
+const presetOpen = ref(false)
+const presetPickerRef = ref(null)
+const presetLabel = computed(
+  () => presets.value.find((p) => p.key === translatePreset.value)?.label || '',
+)
+
+async function loadPresets() {
+  try {
+    const list = await getPromptPresets()
+    presets.value = Array.isArray(list) ? list : []
+  } catch {
+    /* 预设加载失败不影响正常搜索，只是少一个切换器 */
+  }
+}
+
+function choosePreset(key) {
+  presetOpen.value = false
+  if (translatePreset.value === key) return
+  translatePreset.value = key
+  onPresetChange()
+}
+
+function onPresetOutside(e) {
+  if (!presetOpen.value) return
+  if (presetPickerRef.value && !presetPickerRef.value.contains(e.target)) {
+    presetOpen.value = false
+  }
+}
+
+function onPresetEscape(e) {
+  if (e.key === 'Escape' && presetOpen.value) {
+    e.stopPropagation()
+    presetOpen.value = false
+  }
+}
+
+function onPresetChange() {
+  prefs.translate_preset = translatePreset.value
+  // 已有结果且不是本地词库命中时，用新领域重新生成
+  if (searched.value && currentWord.value && !localWord.value) {
+    streamTranslate(currentWord.value)
+  }
+}
 
 /* ---------- 顶栏全局搜索跳转过来时自动查询（v0.11） ----------
    从任意页面在顶栏搜索 → 跳到 /?q=xxx → 这里接管并立即发起双栏查询。
@@ -219,7 +320,16 @@ function runFromQuery() {
   doSearch()
 }
 
-onMounted(runFromQuery)
+onMounted(() => {
+  document.addEventListener('mousedown', onPresetOutside)
+  document.addEventListener('keydown', onPresetEscape)
+  loadPresets()
+  runFromQuery()
+})
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onPresetOutside)
+  document.removeEventListener('keydown', onPresetEscape)
+})
 watch(() => route.query.q, runFromQuery)
 
 /* ========= 左栏：词典 ========= */
@@ -348,6 +458,13 @@ const visibleSections = computed(() => {
   }
   const en = map['例句'], zh = map['译文']
   const showEn = en && en !== '无', showZh = zh && zh !== '无'
+  // 通用翻译模式只有【译文】，没有【例句】，单独渲染
+  if (!('例句' in map) && showZh) {
+    out.push({
+      key: '译文', label: '通用译文', tagCls: 'tag-domain',
+      textCls: 'domain', text: zh, zh: '',
+    })
+  }
   if ('例句' in map && (showEn || showZh || llmStreaming.value)) {
     out.push({
       key: '例句', label: '领域例句', tagCls: 'tag-example',
@@ -427,8 +544,12 @@ async function streamTranslate(word) {
   llmStreaming.value = true
   streamDone.value = false
   let raw = ''
+  // 明确选了领域就尊重选择；否则整句自动走通用翻译
+  const presetKey = translatePreset.value || (looksLikeSentence(word) ? 'general' : '')
+  const general = presetKey === 'general'
   try {
-    const resp = await fetch(`/api/translate/${encodeURIComponent(word)}`, {
+    const preset = presetKey ? `?preset=${encodeURIComponent(presetKey)}` : ''
+    const resp = await fetch(`/api/translate/${encodeURIComponent(word)}${preset}`, {
       signal: abortCtrl.signal,
     })
     if (!resp.ok) {
@@ -456,7 +577,11 @@ async function streamTranslate(word) {
         const delta = obj.choices?.[0]?.delta?.content || ''
         if (delta) {
           raw += delta
-          llmSections.value = parseSections(raw)
+          llmSections.value = general
+            ? raw.trim()
+              ? [{ key: '译文', text: stripTranslationMarker(raw) }]
+              : []
+            : parseSections(raw)
         }
       }
     }

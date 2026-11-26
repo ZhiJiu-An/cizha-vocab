@@ -26,6 +26,8 @@ const routes = [
   // 桌面快查浮窗（⌥A 输入翻译 / ⌥S 截图取词）：由 Tauri 单独开小窗加载，
   // 页面在 App.vue 里不套侧边栏与顶栏
   { path: '/quick', name: 'Quick', component: () => import('../views/QuickTranslate.vue') },
+  // 截图选区浮层（⌥S）：由 Tauri 在鼠标所在显示器上铺一层透明窗口
+  { path: '/shot', name: 'Shot', component: () => import('../views/ShotOverlay.vue') },
   // 兜底路由（P1-5）：没有它时未知 URL 会让主区域整片空白。
   // 重定向回首页（词典搜索），用户至少能继续用。
   { path: '/:pathMatch(.*)*', name: 'NotFound', redirect: '/' },

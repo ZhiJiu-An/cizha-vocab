@@ -1,6 +1,6 @@
 # 词札 macOS 安装指南
 
-当前版本：**v0.2.1**  |  适用系统：**macOS 12.0 (Monterey) 及以上 / Apple Silicon**
+当前版本：**v0.2.3**  |  适用系统：**macOS 12.0 (Monterey) 及以上 / Apple Silicon**
 
 ---
 
@@ -10,9 +10,10 @@
 
 从 GitHub Releases 页面下载 `.dmg` 文件：
 
-> 待发布到 GitHub Releases 后更新链接
 
-文件名：`词札_0.2.1_aarch64.dmg`（~42 MB）
+文件名：`cizha-vocab-v0.2.3-macos-arm64.dmg`（约 31 MB）
+
+下载页：<https://github.com/ZhiJiu-An/cizha-vocab/releases/latest>
 
 ### 2. 安装
 
@@ -80,8 +81,8 @@ cd src-tauri
 cargo tauri build
 
 # 7. 产物在：
-# src-tauri/target/release/bundle/macos/词札.app     (95 MB)
-# src-tauri/target/release/bundle/dmg/词札_0.2.1_aarch64.dmg  (42 MB)
+# src-tauri/target/release/bundle/macos/词札.app
+# src-tauri/target/release/bundle/dmg/词札_0.2.3_aarch64.dmg
 ```
 
 ---

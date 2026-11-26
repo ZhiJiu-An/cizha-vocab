@@ -55,6 +55,12 @@ PROMPT_MARKERS = ("【定名】", "【展开】", "【详解】", "【例句】"
 WORD_PLACEHOLDER = "{word}"
 
 PROMPT_PRESETS = {
+    "general": {
+        "label": "通用翻译",
+        "prompt": """你是专业翻译。把下面的内容翻译成自然、准确的中文，保留原文语气：
+{word}
+规则：原文已是中文就原样输出；只输出译文本身，不要加任何【】标记、解释或列点。""",
+    },
     "llm": {
         "label": "大模型 / AI",
         "prompt": """你是面向大模型 / AI 工程师的术语翻译助手，翻译「{word}」。
@@ -173,6 +179,15 @@ def validate_prompt(prompt: str) -> str:
 def build_prompt(word: str, prompt: str) -> str:
     """把 {word} 替换成查询词；用 replace 而非 format，避免自定义提示词里的花括号报错"""
     return (prompt or preset_prompt("llm")).replace(WORD_PLACEHOLDER, word)
+
+
+def resolve_prompt(card_prompt: str, preset: str | None) -> str:
+    """按本次查询选择的领域预设覆盖模型提示词
+
+    未知 key、空值或 custom（无预设正文）时回落到模型卡自己的提示词，
+    避免前端传脏参数把提示词变成空串。
+    """
+    return preset_prompt(preset or "") or card_prompt
 
 
 def _new_id() -> str:

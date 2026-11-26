@@ -33,6 +33,13 @@ body {
   min-height: 100vh;
 }
 
+/* 截图选区窗口：WebView 必须透明，否则会把整块底色截进去 */
+html.shot-transparent,
+html.shot-transparent body,
+html.shot-transparent #app {
+  background: transparent !important;
+}
+
 /* ========= Layout ========= */
 .app { display: flex; min-height: 100vh; }
 
@@ -478,10 +485,13 @@ body {
   background: #fff;
   border-radius: 11px;
   box-shadow: 0 4px 15px rgba(51, 74, 38, .06);
-  overflow: hidden;
+  /* 不能 hidden：领域切换菜单要溢出到搜索框下方 */
+  overflow: visible;
   border: 1px solid #dce3d6;
   transition: border-color .2s;
 }
+/* overflow 放开后，右端按钮自己兜住圆角 */
+.search-box > .primary { border-radius: 0 11px 11px 0; }
 .search-box:focus-within { border-color: var(--primary-2); }
 .search-box .search-icon {
   display: flex;
@@ -523,6 +533,58 @@ body {
 }
 .search-box .ocr-btn:hover:not(:disabled) { background: #e8eee3; }
 .search-box .ocr-btn:disabled { color: var(--muted-2); cursor: default; }
+
+/* ========= 领域提示词切换（v0.17） ========= */
+.preset-picker { position: relative; display: flex; align-items: stretch; }
+.search-box .preset-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border-left: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.search-box .preset-trigger:hover,
+.search-box .preset-trigger.open { background: #f1f6ee; color: var(--primary-dark); }
+.preset-mark { width: 6px; height: 6px; border-radius: 50%; background: #8fbf9a; flex: none; }
+.preset-current { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.preset-chevron { color: var(--muted); transition: transform .16s ease; flex: none; }
+.search-box .preset-trigger.open .preset-chevron { transform: rotate(180deg); }
+.preset-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  min-width: 218px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px -22px rgba(21, 45, 33, .45);
+}
+.search-box .preset-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+.search-box .preset-item:hover { background: #f1f6ee; }
+.search-box .preset-item.active { background: #eaf3e6; color: var(--primary-dark); }
+.preset-item em { font-style: normal; font-size: 11px; font-weight: 400; color: var(--muted); }
+.preset-check { font-style: normal; font-size: 12px; color: var(--primary); }
 .ocr-file { display: none; }
 
 .ocr-panel {
@@ -967,7 +1029,17 @@ body {
   .search-box { flex-direction: column; }
   .search-box input { padding: 12px 16px; }
   .search-box button { padding: 12px; }
+  .search-box > .primary { border-radius: 0 0 11px 11px; }
   .search-box .ocr-btn { border-left: none; border-top: 1px solid var(--border); }
+  .preset-picker { width: 100%; }
+  .search-box .preset-trigger {
+    width: 100%;
+    justify-content: space-between;
+    padding: 12px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .preset-menu { left: 12px; right: 12px; top: calc(100% + 6px); }
 }
 
 /* Lexi demo shell: spacious workspace, quiet botanical details, real app data. */

@@ -42,6 +42,7 @@ class PrefsTestCase(ApiTestCase):
         payload = {
             "nickname": "阿榛",
             "accent": "uk",
+            "translate_preset": "medical",
             "reminder": {
                 "enabled": True,
                 "time": "21:30",
@@ -64,6 +65,11 @@ class PrefsTestCase(ApiTestCase):
     def test_invalid_reminder_time_rejected(self):
         resp = self.client.put("/api/prefs", json={"reminder": {"time": "25:99"}})
         self.assertEqual(resp.status_code, 422)
+
+    def test_invalid_translate_preset_ignored(self):
+        resp = self.client.put("/api/prefs", json={"translate_preset": "banana"})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(self.client.get("/api/prefs").json()["translate_preset"], "")
 
     def test_corrupt_file_falls_back_to_defaults(self):
         self.path.write_text("{not json", encoding="utf-8")

@@ -1,6 +1,8 @@
 <template>
-  <!-- 桌面快查浮窗：只渲染页面本身，不套侧边栏 / 顶栏 -->
-  <div v-if="isQuick" class="quick-shell"><router-view /></div>
+  <!-- 桌面浮层（快查 / 截图选区）：只渲染页面本身，不套侧边栏与顶栏 -->
+  <div v-if="isBare" class="bare-shell"><router-view /></div>
+  <!-- 浮层窗口路由就绪前保持空白（透明），绝不渲染主界面 -->
+  <div v-else-if="overlayBooting" class="bare-shell"></div>
 
   <div v-else class="app">
     <aside class="sidebar">
@@ -78,7 +80,15 @@ const router = useRouter()
 const dueCount = ref(0)
 const globalQuery = ref('')
 const headerSearchRef = ref(null)
+// 当前窗口是否是桌面浮层（由 URL 决定，路由就绪与否都成立）
+const overlayWindow =
+  typeof window !== 'undefined' &&
+  (window.location.pathname === '/quick' || window.location.pathname === '/shot')
 const isQuick = computed(() => route.path === '/quick')
+// 截图选区层同样不跑主界面逻辑（不能用快捷键切页、不弹提醒）
+const isBare = computed(() => isQuick.value || route.path === '/shot')
+// 浮层窗口在路由解析完成前保持空白，避免把主界面铺满整个屏幕
+const overlayBooting = computed(() => overlayWindow && !isBare.value)
 const name = computed(displayName)
 const avatar = computed(avatarText)
 const currentTitle = computed(() => ({ '/': '词典', '/words': '词库', '/review': '复习', '/stats': '统计', '/tags': '标签', '/settings': '设置', '/settings/general': '通用设置', '/settings/models': '模型配置', '/settings/shortcuts': '快捷键', '/new': '新建词条' }[route.path] || (route.path.includes('/edit') || route.path.match(/^\/words\/\d+$/) ? '词条详情' : '词典')))
@@ -119,7 +129,7 @@ const NAV_ACTIONS = {
 }
 
 function onShortcutKeydown(e) {
-  if (isQuick.value) return
+  if (overlayWindow) return
   if (matchesCombo(e, shortcuts.value.focus_search)) {
     e.preventDefault()
     headerSearchRef.value?.focus()
@@ -189,8 +199,8 @@ function checkReminder() {
 let reminderTimer
 
 onMounted(async () => {
-  // 快查浮窗不跑主界面的复习提醒，避免两个窗口重复计时
-  if (isQuick.value) return
+  // 浮层窗口不跑主界面的复习提醒，避免多个窗口重复计时
+  if (overlayWindow) return
   window.addEventListener('keydown', onShortcutKeydown)
   // 先拿到真实到期数再判断是否提醒；拉取失败则跳过本次，也不写提醒键
   if (await refreshDue()) checkReminder()

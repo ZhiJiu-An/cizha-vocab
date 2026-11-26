@@ -394,3 +394,12 @@ class TestPureHelpers(unittest.TestCase):
                                     "prompt": "", "model": "m"})
         self.assertEqual(card["prompt_preset"], "llm")
         self.assertIn("【定名】", card["prompt"])
+
+    def test_resolve_prompt_overrides_card_prompt(self):
+        self.assertIn("软件工程", config.resolve_prompt("卡片提示词", "cs"))
+        self.assertIn("医学", config.resolve_prompt("卡片提示词", "medical"))
+
+    def test_resolve_prompt_falls_back(self):
+        # 不传 / 未知 / custom（无预设正文）都沿用模型卡自己的提示词
+        for preset in (None, "", "banana", "custom"):
+            self.assertEqual(config.resolve_prompt("卡片提示词", preset), "卡片提示词")

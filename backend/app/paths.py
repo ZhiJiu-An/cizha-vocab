@@ -61,6 +61,16 @@ def _user_data_dir() -> Path:
     return target
 
 
+def _data_override() -> Path | None:
+    """开发模式覆盖数据目录：CIZHA_DATA_DIR=/path
+
+    壳层以 `cargo tauri dev` 运行时改用源码后端，同时把数据目录指向
+    打包版的用户目录，保证开发版和正式版看到同一份词库 / 配置。
+    """
+    raw = os.environ.get("CIZHA_DATA_DIR")
+    return Path(raw).expanduser() if raw else None
+
+
 def get_data_dir() -> Path:
     """SQLite / llm_config.json / .env 统一存放位置。
 
@@ -68,6 +78,11 @@ def get_data_dir() -> Path:
     llm_config.json 等）复制到用户目录，之后一直读写用户目录，
     临时目录退出即丢也不影响数据。
     """
+    override = _data_override()
+    if override:
+        override.mkdir(parents=True, exist_ok=True)
+        return override
+
     if not is_packaged():
         return _source_backend_root() / "data"
 
@@ -89,6 +104,10 @@ def get_data_dir() -> Path:
 
 def get_env_path() -> Path:
     """.env 文件位置。源码模式下不存在不会报错（默认没配 Key 也能跑）。"""
+    override = _data_override()
+    if override:
+        return override / ".env"
+
     if not is_packaged():
         candidate = _source_backend_root() / ".env"
         if candidate.is_file():

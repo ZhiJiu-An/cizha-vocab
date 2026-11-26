@@ -16,7 +16,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -94,7 +94,11 @@ struct QuickPayload {
     mode: String,
     /// data URL（image/png;base64）
     image: Option<String>,
+    /// 原生 OCR 识别出的文字（有值时前端直接填入输入框，不再上传图片）
+    text: Option<String>,
     error: Option<String>,
+    /// 缺少「屏幕录制」权限：前端据此展示「打开系统设置」按钮
+    needs_permission: bool,
 }
 
 // 菜单项 ID（托盘菜单）
@@ -104,6 +108,19 @@ const MENU_QUIT: &str = "quit";
 
 // 快查浮窗标签
 const QUICK_LABEL: &str = "quick";
+// 截图选区浮层标签
+const SHOT_LABEL: &str = "shot";
+
+/// 选区层无操作后由壳层兜底关闭的时限。
+/// 防止页面脚本失效时全屏置顶窗口无限期遮挡桌面。
+const SHOT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// 选区层代次：每次显示递增，旧的超时看护据此判断自己是否已过期。
+static SHOT_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// 唤起截图前的前台应用 PID；取消选区后把焦点还回去，
+/// 避免词札被激活后把主窗口顶到最前面。
+static PREV_FRONTMOST_PID: AtomicI32 = AtomicI32::new(0);
 
 fn main() {
     // 先屏蔽退出信号，再创建任何线程：这样后续线程都继承屏蔽字，
@@ -128,6 +145,9 @@ fn main() {
             get_global_shortcuts,
             set_global_shortcut,
             reset_global_shortcuts,
+            open_screen_recording_settings,
+            finish_region_shot,
+            cancel_region_shot,
         ])
         // macOS: show 窗口时强制激活（抢回焦点到最前，不管其他 App 是否在最前）
         .activate_ignoring_other_apps(true)
@@ -226,7 +246,10 @@ fn main() {
             }
             // macOS：窗口被关掉（隐藏到托盘）后再点 Dock 图标，要能重新显示
             #[cfg(target_os = "macos")]
-            RunEvent::Reopen { .. } => toggle_window(app, true),
+            RunEvent::Reopen { .. } => {
+                log_wins(app, "Reopen");
+                toggle_window(app, true);
+            }
             _ => {}
         });
 }
@@ -760,6 +783,7 @@ fn ensure_quick_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R
 /// 窗口创建统一回主线程：从快捷键/截图线程直接建窗在 macOS 上会卡死。
 fn show_quick<R: Runtime>(app: &AppHandle<R>, payload: QuickPayload) {
     let existed = app.get_webview_window(QUICK_LABEL).is_some();
+    log_wins(app, &format!("quick 显示前 existed={existed} mode={}", payload.mode));
     if let Some(state) = app.try_state::<AppState>() {
         if let Ok(mut pending) = state.quick_pending.lock() {
             *pending = if existed { None } else { Some(payload.clone()) };
@@ -771,8 +795,11 @@ fn show_quick<R: Runtime>(app: &AppHandle<R>, payload: QuickPayload) {
             eprintln!("⚠️  快查浮窗不可用（后端可能还没就绪）");
             return;
         };
+        log_wins(&handle, "quick show 前");
         let _ = window.show();
+        log_wins(&handle, "quick show 后");
         let _ = window.set_focus();
+        log_wins(&handle, "quick set_focus 后");
         let _ = handle.emit_to(QUICK_LABEL, "quick-open", payload);
     });
 }
@@ -791,7 +818,9 @@ fn open_quick_text<R: Runtime>(app: &AppHandle<R>) {
             id: next_payload_id(),
             mode: "text".into(),
             image: None,
+            text: None,
             error: None,
+            needs_permission: false,
         },
     );
 }
@@ -800,71 +829,751 @@ fn open_quick_text<R: Runtime>(app: &AppHandle<R>) {
 fn open_quick_shot<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     thread::spawn(move || {
-        // 浮窗若已在屏幕上，先藏起来，避免把自己截进去
+        log_wins(&app, "open_quick_shot");
+        // 选区层已显示时，⌥S 视为关闭而不是重新截图。
+        // 页面脚本失效时，这是用户退出全屏置顶窗口的最后一条路径。
+        if close_visible_shot_overlay(&app, "再次按键关闭") {
+            return;
+        }
+
+        // 权限必须在截图前确认：没有「屏幕录制」权限时截屏只会得到桌面壁纸。
+        let access = ensure_screen_recording();
+        log_screen_event(&format!(
+            "按 ⌥S：access={}",
+            match access {
+                ScreenAccess::Granted => "granted",
+                ScreenAccess::PendingRestart => "pending_restart",
+                ScreenAccess::Denied => "denied",
+            }
+        ));
+        if !matches!(access, ScreenAccess::Granted) {
+            show_quick(&app, permission_payload(matches!(access, ScreenAccess::Denied)));
+            return;
+        }
+
+        // 浮窗若已在屏幕上，先藏起来，避免把浮窗截进去
         if let Some(window) = app.get_webview_window(QUICK_LABEL) {
             let _ = window.hide();
         }
-        thread::sleep(Duration::from_millis(120));
 
-        let payload = match capture_region() {
-            Ok(Some(image)) => QuickPayload {
-                id: next_payload_id(),
-                mode: "image".into(),
-                image: Some(image),
-                error: None,
-            },
-            // 用户按 Esc 取消，安静收场
-            Ok(None) => return,
-            Err(message) => QuickPayload {
-                id: next_payload_id(),
-                mode: "text".into(),
-                image: None,
-                error: Some(format!("截图失败：{message}")),
-            },
-        };
-        show_quick(&app, payload);
+        // 全屏透明选区窗口必须在主线程创建
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Err(e) = show_shot_overlay(&handle) {
+                eprintln!("⚠️  截图选区不可用: {e}");
+                show_quick(
+                    &handle,
+                    QuickPayload {
+                        id: next_payload_id(),
+                        mode: "text".into(),
+                        image: None,
+                        text: None,
+                        error: Some(format!("截图失败：{e}")),
+                        needs_permission: false,
+                    },
+                );
+            }
+        });
     });
 }
 
-/// 调系统自带 screencapture 做区域截图，返回 data URL；Ok(None) = 用户取消。
-/// 首次使用会要求「屏幕录制」权限，被拒时 stderr 有内容，原样带回前端提示。
+// 选区层显示/隐藏时同步切换系统光标：只用 CSS 的话，指针不动时不会立刻变
 #[cfg(target_os = "macos")]
-fn capture_region() -> Result<Option<String>, String> {
-    use base64::Engine;
+#[link(name = "AppKit", kind = "framework")]
+extern "C" {}
 
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!("cizha-shot-{nanos}.png"));
-
-    let output = Command::new("/usr/sbin/screencapture")
-        .args(["-i", "-x", "-o", "-t", "png"])
-        .arg(&path)
-        .output()
-        .map_err(|e| format!("无法启动系统截图：{e}"))?;
-
-    if !output.status.success() {
-        let _ = std::fs::remove_file(&path);
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return if stderr.is_empty() { Ok(None) } else { Err(stderr) };
+#[cfg(target_os = "macos")]
+fn set_native_cursor_crosshair() {
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    unsafe {
+        let cursor: Retained<AnyObject> = msg_send![objc2::class!(NSCursor), crosshairCursor];
+        let _: () = msg_send![&cursor, set];
     }
+}
 
-    let bytes = std::fs::read(&path).map_err(|e| format!("读取截图失败：{e}"));
-    let _ = std::fs::remove_file(&path);
-    let bytes = bytes?;
-    if bytes.is_empty() {
-        return Ok(None);
+#[cfg(target_os = "macos")]
+fn set_native_cursor_arrow() {
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    unsafe {
+        let cursor: Retained<AnyObject> = msg_send![objc2::class!(NSCursor), arrowCursor];
+        let _: () = msg_send![&cursor, set];
     }
-    Ok(Some(format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn capture_region() -> Result<Option<String>, String> {
+fn set_native_cursor_crosshair() {}
+
+#[cfg(not(target_os = "macos"))]
+fn set_native_cursor_arrow() {}
+
+/// 当前前台应用 PID（诊断与焦点还原共用）。
+#[cfg(target_os = "macos")]
+fn frontmost_pid() -> i32 {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    unsafe {
+        let workspace: *mut AnyObject = msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return 0;
+        }
+        let app: *mut AnyObject = msg_send![workspace, frontmostApplication];
+        if app.is_null() {
+            return 0;
+        }
+        msg_send![app, processIdentifier]
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn frontmost_pid() -> i32 {
+    0
+}
+
+/// 记录唤起截图前的前台应用，供取消后还原焦点。
+#[cfg(target_os = "macos")]
+fn remember_frontmost_app() {
+    let pid = frontmost_pid();
+    if pid > 0 {
+        PREV_FRONTMOST_PID.store(pid, Ordering::SeqCst);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn remember_frontmost_app() {}
+
+/// 取消选区后激活唤起截图前的应用，避免主窗口被顶到前台。
+#[cfg(target_os = "macos")]
+fn restore_frontmost_app() {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let pid = PREV_FRONTMOST_PID.swap(0, Ordering::SeqCst);
+    if pid <= 0 || pid == std::process::id() as i32 {
+        return;
+    }
+    unsafe {
+        let app: *mut AnyObject = msg_send![
+            objc2::class!(NSRunningApplication),
+            runningApplicationWithProcessIdentifier: pid
+        ];
+        if app.is_null() {
+            return;
+        }
+        // NSApplicationActivateIgnoringOtherApps = 1 << 1
+        let _: bool = msg_send![app, activateWithOptions: 2usize];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restore_frontmost_app() {}
+
+/// 截图会话开始前，若主窗口在后台仍可见，先隐藏它。
+/// 点击透明选区层会让它取得焦点，macOS 随即激活词札，
+/// 并把该应用所有可见窗口一起抬到前台 —— 阅读场景下主窗口会盖住正在读的文档。
+/// 词札已经在前台时不隐藏：此时主窗口是用户正在看的窗口。
+fn hide_background_main_window<R: Runtime>(app: &AppHandle<R>) {
+    if frontmost_pid() == std::process::id() as i32 {
+        return;
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+            log_wins(app, "截图前隐藏后台主窗");
+        }
+    }
+}
+
+/// 诊断：记录前台应用 PID 与 main / quick / shot 的可见、聚焦状态。
+/// 仅用于定位窗口激活问题，输出到 screen.log。
+fn log_wins<R: Runtime>(app: &AppHandle<R>, tag: &str) {
+    let state = |label: &str| match app.get_webview_window(label) {
+        Some(w) => format!(
+            "{label}[v{} f{}]",
+            u8::from(w.is_visible().unwrap_or(false)),
+            u8::from(w.is_focused().unwrap_or(false))
+        ),
+        None => format!("{label}[-]"),
+    };
+    log_screen_event(&format!(
+        "[窗] {tag} front={} {} {} {}",
+        frontmost_pid(),
+        state("main"),
+        state("quick"),
+        state("shot")
+    ));
+}
+
+/// 隐藏可见的选区层并恢复箭头光标；返回是否确实关闭了一个可见窗口。
+/// 提交选区或取消后窗口已隐藏，到期的超时看护据此静默退出，不重复操作。
+fn close_visible_shot_overlay<R: Runtime>(app: &AppHandle<R>, reason: &str) -> bool {
+    let Some(window) = app.get_webview_window(SHOT_LABEL) else {
+        disarm_shot_esc(app);
+        return false;
+    };
+    if !window.is_visible().unwrap_or(false) {
+        disarm_shot_esc(app);
+        return false;
+    }
+    // 先把焦点还给原应用，再隐藏选区层：
+    // 否则 macOS 会先把词札主窗口顶到前台，造成闪现。
+    log_wins(app, &format!("close 前 {reason}"));
+    let _ = app.run_on_main_thread(restore_frontmost_app);
+    let _ = window.hide();
+    log_wins(app, &format!("close 后 {reason}"));
+    let _ = app.run_on_main_thread(set_native_cursor_arrow);
+    disarm_shot_esc(app);
+    log_screen_event(&format!("选区层关闭：{reason}"));
+    true
+}
+
+/// 武装选区层的超时看护：到期时代次未变且窗口仍可见，就由壳层自动关闭。
+fn arm_shot_watchdog<R: Runtime>(app: &AppHandle<R>) {
+    let epoch = SHOT_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+    let handle = app.clone();
+    thread::spawn(move || {
+        thread::sleep(SHOT_TIMEOUT);
+        if SHOT_EPOCH.load(Ordering::SeqCst) != epoch {
+            return; // 已有更新的选区层，旧任务作废
+        }
+        close_visible_shot_overlay(&handle, "超时关闭");
+    });
+}
+
+/// 选区层显示期间临时注册 Esc 为全局取消键。
+/// 选区层不抢焦点，页面收不到键盘事件，Esc 只能由壳层接住。
+static SHOT_ESC_REGISTERED: AtomicBool = AtomicBool::new(false);
+
+fn arm_shot_esc<R: Runtime>(app: &AppHandle<R>) {
+    if SHOT_ESC_REGISTERED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Ok(shortcut) = "Escape".parse::<Shortcut>() else {
+        SHOT_ESC_REGISTERED.store(false, Ordering::SeqCst);
+        log_screen_event("注册 Esc 取消失败：无法解析快捷键");
+        return;
+    };
+    let result = app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
+        if event.state != ShortcutState::Pressed {
+            return;
+        }
+        let handle = app.clone();
+        // 不在快捷键回调里注销自身，避免重入
+        thread::spawn(move || {
+            if close_visible_shot_overlay(&handle, "Esc 关闭") {
+                disarm_shot_esc(&handle);
+            }
+        });
+    });
+    if let Err(e) = result {
+        SHOT_ESC_REGISTERED.store(false, Ordering::SeqCst);
+        log_screen_event(&format!("注册 Esc 取消失败：{e}"));
+    }
+}
+
+fn disarm_shot_esc<R: Runtime>(app: &AppHandle<R>) {
+    if !SHOT_ESC_REGISTERED.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if let Ok(shortcut) = "Escape".parse::<Shortcut>() {
+        let _ = app.global_shortcut().unregister(shortcut);
+    }
+}
+
+/// 在鼠标所在显示器上铺一层透明选区窗口（页面 `/shot`）。
+/// 不再调用 `screencapture` 子进程：它会以独立进程身份触发屏幕录制授权，
+/// 导致系统设置里已勾选词札、每次截图仍弹窗。
+fn show_shot_overlay<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    log_wins(app, "show_shot_overlay");
+    remember_frontmost_app();
+    hide_background_main_window(app);
+    let port = current_port(app).ok_or("后端尚未就绪")?;
+    let cursor = app.cursor_position().map_err(|e| e.to_string())?;
+    let monitor = app
+        .monitor_from_point(cursor.x, cursor.y)
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten())
+        .ok_or("找不到可用显示器")?;
+    let scale = monitor.scale_factor();
+    let pos = monitor.position();
+    let size = monitor.size();
+    let x = pos.x as f64 / scale;
+    let y = pos.y as f64 / scale;
+    let width = size.width as f64 / scale;
+    let height = size.height as f64 / scale;
+
+    let url = Url::parse(&format!("http://127.0.0.1:{port}/shot")).map_err(|e| e.to_string())?;
+
+    // 选区窗口只创建一次，之后复用：重载页面清掉上次选区，再显示。
+    // 不能用 close() 后立刻 build()：Tauri 的销毁是异步的，同 label 会冲突。
+    if let Some(win) = app.get_webview_window(SHOT_LABEL) {
+        let _ = win.hide();
+        let _ = win.navigate(url);
+        arm_shot_watchdog(app);
+        arm_shot_esc(app);
+        let handle = win.clone();
+        let app_handle = app.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            // 只显示不抢焦点：保留当前阅读应用的焦点与外观
+            let _ = handle.show();
+            log_wins(&app_handle, "shot show 后(复用)");
+            let _ = app_handle.run_on_main_thread(set_native_cursor_crosshair);
+        });
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(app, SHOT_LABEL, WebviewUrl::External(url))
+        .title("词札 · 截图")
+        .position(x, y)
+        .inner_size(width, height)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .transparent(true)
+        // 第一次点击就交给页面（否则只是激活窗口，用户要点两下才能开始框选）
+        .accept_first_mouse(true)
+        // 不主动抢焦点：避免创建窗口时把词札主窗口顶到前台
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|e| format!("无法创建选区窗口：{e}"))?;
+    arm_shot_watchdog(app);
+    arm_shot_esc(app);
+    // 等页面首帧（含路由解析、透明样式）完成再显示，避免闪一下主界面
+    let win = window.clone();
+    let app_handle = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(250));
+        // 只显示不抢焦点：保留当前阅读应用的焦点与外观
+        let _ = win.show();
+        log_wins(&app_handle, "shot show 后(新建)");
+        let _ = app_handle.run_on_main_thread(set_native_cursor_crosshair);
+    });
+    Ok(())
+}
+
+/// 前端选区完成：x / y / width / height 都是窗口内 CSS 像素（macOS 上等于 point）
+#[tauri::command]
+fn finish_region_shot(
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    log_wins(&app, "finish 入口");
+    if width < 4.0 || height < 4.0 {
+        return Err("选区太小".into());
+    }
+    let Some(window) = app.get_webview_window(SHOT_LABEL) else {
+        return Err("选区窗口不存在".into());
+    };
+    // 选区层已被兜底关闭或取消：忽略拖拽结束后迟到的提交
+    if !window.is_visible().unwrap_or(false) {
+        return Ok(());
+    }
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    // 全局逻辑坐标：窗口物理位置 / scale，再加上页面内偏移
+    let gx = pos.x as f64 / scale + x;
+    let gy = pos.y as f64 / scale + y;
+
+    let _ = window.hide();
+    log_wins(&app, "finish hide 后");
+    disarm_shot_esc(&app);
+    let _ = app.run_on_main_thread(set_native_cursor_arrow);
+    let handle = app.clone();
+    thread::spawn(move || {
+        // 等遮罩真正从屏幕上消失，避免把自己截进去
+        thread::sleep(Duration::from_millis(140));
+        let captured = capture_rect_points(gx, gy, width, height);
+        log_screen_event(&format!(
+            "取图 ({gx:.0},{gy:.0}) {width:.0}x{height:.0}: {}",
+            match &captured {
+                Ok(_) => "ok".to_string(),
+                Err(e) => format!("err: {e}"),
+            }
+        ));
+        let payload = match captured {
+            // 端上 OCR 有结果：只把文字发给前端，秒出；图片不必再传
+            Ok((_, text)) if !text.trim().is_empty() => QuickPayload {
+                id: next_payload_id(),
+                mode: "text".into(),
+                image: None,
+                text: Some(text),
+                error: None,
+                needs_permission: false,
+            },
+            // OCR 没认出字：保留图片，走原有视觉模型兜底
+            Ok((image, _)) => QuickPayload {
+                id: next_payload_id(),
+                mode: "image".into(),
+                image: Some(image),
+                text: None,
+                error: None,
+                needs_permission: false,
+            },
+            Err(e) => QuickPayload {
+                id: next_payload_id(),
+                mode: "text".into(),
+                image: None,
+                text: None,
+                error: Some(format!("截图失败：{e}")),
+                needs_permission: false,
+            },
+        };
+        show_quick(&handle, payload);
+    });
+    Ok(())
+}
+
+/// Esc 或点击取消：藏起选区层，不开快查浮窗
+#[tauri::command]
+fn cancel_region_shot(app: tauri::AppHandle) {
+    log_wins(&app, "cancel 入口");
+    let _ = app.run_on_main_thread(restore_frontmost_app);
+    if let Some(window) = app.get_webview_window(SHOT_LABEL) {
+        let _ = window.hide();
+    }
+    log_wins(&app, "cancel hide 后");
+    disarm_shot_esc(&app);
+    let _ = app.run_on_main_thread(set_native_cursor_arrow);
+}
+
+/// 未授权时的提示载荷。macOS 授权后需要重启 App 才对当前进程生效，必须写明。
+/// `needs_settings` 为 true 表示还没授权，附上「打开设置」按钮；
+/// 为 false 表示已授权但当前进程未生效，只需提示重启。
+fn permission_payload(needs_settings: bool) -> QuickPayload {
+    let error = if needs_settings {
+        "未获得「屏幕录制」权限，截图只会得到桌面壁纸。\
+         请在 系统设置 → 隐私与安全性 → 屏幕录制 中勾选「词札」，\
+         然后退出并重新打开词札再试。"
+    } else {
+        "已获得「屏幕录制」权限，但需要重启词札后才生效。请退出并重新打开词札。"
+    };
+    QuickPayload {
+        id: next_payload_id(),
+        mode: "text".into(),
+        image: None,
+        text: None,
+        error: Some(error.into()),
+        needs_permission: needs_settings,
+    }
+}
+
+/// 屏幕录制权限的三态：已生效 / 已申请但当前进程未生效 / 未授权
+#[allow(dead_code)]
+enum ScreenAccess {
+    Granted,
+    PendingRestart,
+    Denied,
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    /// 只查询授权状态，不弹窗
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    /// 首次调用会弹出系统授权框，并把 App 加进「屏幕录制」列表
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+/// 每次启动最多主动申请一次授权，避免每次按 ⌥S 都被系统弹窗打断
+#[cfg(target_os = "macos")]
+static SCREEN_RECORD_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// 截图链路诊断日志：~/Library/Logs/com.cizha.vocab/screen.log
+/// 权限问题在不同 macOS 版本上表现不一，留一份时间线便于排查。
+fn log_screen_event(message: &str) {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let dir = PathBuf::from(home).join("Library/Logs/com.cizha.vocab");
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("screen.log"))
+    {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(file, "[{secs}] {message}");
+    }
+}
+
+/// 当前进程是否可以使用屏幕录制。
+/// 注意：preflight 为 false 时即使 CGRequest 返回 true，也必须重启 App 才真正生效，
+/// 所以这里不直接放行截图，避免又截到一张桌面壁纸。
+#[cfg(target_os = "macos")]
+fn ensure_screen_recording() -> ScreenAccess {
+    if unsafe { CGPreflightScreenCaptureAccess() } {
+        return ScreenAccess::Granted;
+    }
+    if !SCREEN_RECORD_REQUESTED.swap(true, Ordering::SeqCst)
+        && unsafe { CGRequestScreenCaptureAccess() }
+    {
+        return ScreenAccess::PendingRestart;
+    }
+    ScreenAccess::Denied
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_screen_recording() -> ScreenAccess {
+    // 非 macOS 没有 TCC；交给 capture_region 返回「仅支持 macOS」
+    ScreenAccess::Granted
+}
+
+/// 打开「隐私与安全性 → 屏幕录制」设置页，供权限提示里的按钮调用
+#[tauri::command]
+fn open_screen_recording_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .status()
+            .map_err(|e| format!("无法打开系统设置：{e}"))?;
+        if status.success() {
+            return Ok(());
+        }
+        return Err("无法打开系统设置".into());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("系统级截图仅支持 macOS".into())
+    }
+}
+
+/// macOS 原生区域截图：CGWindowListCreateImage 在应用进程内取图，
+/// 权限归属词札本身；返回 data URL。
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGPoint {
+    x: f64,
+    y: f64,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGSize {
+    width: f64,
+    height: f64,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGRect {
+    origin: CGPoint,
+    size: CGSize,
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGWindowListCreateImage(
+        screen_bounds: CGRect,
+        list_option: u32,
+        window_id: u32,
+        image_option: u32,
+    ) -> *mut std::ffi::c_void;
+    fn CGImageRelease(image: *mut std::ffi::c_void);
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFDataCreateMutable(
+        allocator: *const std::ffi::c_void,
+        capacity: isize,
+    ) -> *mut std::ffi::c_void;
+    fn CFDataGetBytePtr(data: *const std::ffi::c_void) -> *const u8;
+    fn CFDataGetLength(data: *const std::ffi::c_void) -> isize;
+    fn CFStringCreateWithCString(
+        allocator: *const std::ffi::c_void,
+        c_str: *const std::os::raw::c_char,
+        encoding: u32,
+    ) -> *const std::ffi::c_void;
+    fn CFRelease(cf: *const std::ffi::c_void);
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "ImageIO", kind = "framework")]
+extern "C" {
+    fn CGImageDestinationCreateWithData(
+        data: *mut std::ffi::c_void,
+        type_identifier: *const std::ffi::c_void,
+        count: usize,
+        options: *const std::ffi::c_void,
+    ) -> *mut std::ffi::c_void;
+    fn CGImageDestinationAddImage(
+        destination: *mut std::ffi::c_void,
+        image: *mut std::ffi::c_void,
+        properties: *const std::ffi::c_void,
+    );
+    fn CGImageDestinationFinalize(destination: *mut std::ffi::c_void) -> bool;
+}
+
+#[cfg(target_os = "macos")]
+fn capture_rect_points(x: f64, y: f64, width: f64, height: f64) -> Result<(String, String), String> {
+    use base64::Engine;
+    use std::ffi::c_void;
+    use std::ptr;
+
+    const K_ON_SCREEN_ONLY: u32 = 1;
+    const K_NULL_WINDOW_ID: u32 = 0;
+    const K_IMAGE_DEFAULT: u32 = 0;
+    const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+    let rect = CGRect {
+        origin: CGPoint { x, y },
+        size: CGSize { width, height },
+    };
+    let image = unsafe {
+        CGWindowListCreateImage(rect, K_ON_SCREEN_ONLY, K_NULL_WINDOW_ID, K_IMAGE_DEFAULT)
+    };
+    if image.is_null() {
+        return Err("无法获取屏幕图像（屏幕录制权限可能未生效）".into());
+    }
+
+    // 先在原图上做系统级 OCR（Apple Vision，毫秒级），再编码 PNG
+    let ocr_text = ocr_cg_image(image);
+
+    let encoded = unsafe {
+        let data = CFDataCreateMutable(ptr::null(), 0);
+        let uti = CFStringCreateWithCString(
+            ptr::null(),
+            b"public.png\0".as_ptr() as *const std::os::raw::c_char,
+            K_CF_STRING_ENCODING_UTF8,
+        );
+        if data.is_null() || uti.is_null() {
+            if !data.is_null() {
+                CFRelease(data as *const c_void);
+            }
+            if !uti.is_null() {
+                CFRelease(uti);
+            }
+            CGImageRelease(image);
+            return Err("截图编码初始化失败".into());
+        }
+
+        let dest = CGImageDestinationCreateWithData(data, uti, 1, ptr::null());
+        let bytes = if dest.is_null() {
+            None
+        } else {
+            CGImageDestinationAddImage(dest, image, ptr::null());
+            let ok = CGImageDestinationFinalize(dest);
+            let result = if ok {
+                let len = CFDataGetLength(data as *const c_void);
+                let raw_ptr = CFDataGetBytePtr(data as *const c_void);
+                if raw_ptr.is_null() || len <= 0 {
+                    None
+                } else {
+                    Some(std::slice::from_raw_parts(raw_ptr, len as usize).to_vec())
+                }
+            } else {
+                None
+            };
+            CFRelease(dest as *const c_void);
+            result
+        };
+
+        CFRelease(data as *const c_void);
+        CFRelease(uti);
+        CGImageRelease(image);
+        bytes
+    };
+
+    let bytes = encoded.ok_or("截图编码失败")?;
+    Ok((
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ),
+        ocr_text,
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_rect_points(_x: f64, _y: f64, _width: f64, _height: f64) -> Result<(String, String), String> {
     Err("截图取词目前仅支持 macOS".into())
+}
+
+// 用 Apple Vision 做端上 OCR，和 EasyDict 同一套系统能力。
+// 失败返回空串，由调用方回退到上传图片走视觉模型。
+#[cfg(target_os = "macos")]
+#[link(name = "Vision", kind = "framework")]
+extern "C" {}
+#[cfg(target_os = "macos")]
+fn ocr_cg_image(image: *mut std::ffi::c_void) -> String {
+    use objc2::msg_send;
+    use objc2::rc::{Allocated, Retained};
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSArray, NSString};
+
+    if image.is_null() {
+        return String::new();
+    }
+
+    unsafe {
+        let request: Retained<AnyObject> = msg_send![objc2::class!(VNRecognizeTextRequest), new];
+        // VNRequestTextRecognitionLevelAccurate = 1
+        let _: () = msg_send![&request, setRecognitionLevel: 1isize];
+        let languages = NSArray::from_retained_slice(&[
+            NSString::from_str("zh-Hans"),
+            NSString::from_str("en-US"),
+        ]);
+        let _: () = msg_send![&request, setRecognitionLanguages: &*languages];
+        let _: () = msg_send![&request, setUsesLanguageCorrection: true];
+
+        let alloc: Allocated<AnyObject> =
+            msg_send![objc2::class!(VNImageRequestHandler), alloc];
+        let handler: Option<Retained<AnyObject>> = msg_send![
+            alloc,
+            initWithCGImage: image,
+            options: std::ptr::null::<AnyObject>()
+        ];
+        let Some(handler) = handler else {
+            return String::new();
+        };
+
+        let requests = NSArray::from_retained_slice(&[request.clone()]);
+        let mut error: *mut AnyObject = std::ptr::null_mut();
+        let ok: bool = msg_send![&*handler, performRequests: &*requests, error: &mut error];
+        if !ok {
+            return String::new();
+        }
+
+        let results: Option<Retained<NSArray<AnyObject>>> = msg_send![&request, results];
+        let Some(results) = results else {
+            return String::new();
+        };
+
+        let mut lines: Vec<String> = Vec::new();
+        for observation in results.iter() {
+            let candidates: Option<Retained<NSArray<AnyObject>>> =
+                msg_send![&*observation, topCandidates: 1usize];
+            let Some(candidates) = candidates else { continue };
+            let Some(candidate) = candidates.firstObject() else {
+                continue;
+            };
+            let text: Retained<NSString> = msg_send![&*candidate, string];
+            let line = text.to_string();
+            if !line.trim().is_empty() {
+                lines.push(line);
+            }
+        }
+        lines.join("\n")
+    }
 }
 
 /// 前端挂载后主动取一次（新建窗口时事件可能比页面加载更早）
@@ -878,6 +1587,7 @@ fn quick_hide(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(QUICK_LABEL) {
         let _ = window.hide();
     }
+    log_wins(&app, "quick_hide 后");
 }
 
 /// 把词交给主窗口的词典页（/?q=xxx），复用完整的双栏结果
@@ -1036,17 +1746,52 @@ fn backend_executable<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
+/// 开发模式（cargo tauri dev）优先跑源码后端：
+/// 这样改 Python 只需重启壳层，前端 dist 也由源码路径直接托管，无需 PyInstaller。
+fn dev_backend_command() -> Option<Command> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let backend = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("backend");
+    let run_py = backend.join("run.py");
+    let python = if cfg!(windows) {
+        backend.join("venv").join("Scripts").join("python.exe")
+    } else {
+        backend.join("venv").join("bin").join("python")
+    };
+    if !run_py.is_file() || !python.is_file() {
+        return None;
+    }
+    let mut cmd = Command::new(python);
+    cmd.arg(run_py);
+    // 与打包版共用同一份数据（词库 / 模型配置 / 偏好），避免开发版看到空库
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        cmd.env(
+            "CIZHA_DATA_DIR",
+            PathBuf::from(home).join("Library/Application Support/cizha"),
+        );
+    }
+    Some(cmd)
+}
+
 /// spawn 后端进程：端口交给系统分配，启动完成后写入 ready 文件
 fn spawn_backend<R: Runtime>(app: &AppHandle<R>, ready_file: &Path) -> Option<Child> {
-    let path = match backend_executable(app) {
-        Some(path) => path,
+    let mut cmd = match dev_backend_command() {
+        Some(cmd) => cmd,
         None => {
-            eprintln!("❌ 找不到后端可执行文件（resource_dir / dist / _pybuild 都没有）");
-            return None;
+            let path = match backend_executable(app) {
+                Some(path) => path,
+                None => {
+                    eprintln!("❌ 找不到后端可执行文件（resource_dir / dist / _pybuild 都没有）");
+                    return None;
+                }
+            };
+            Command::new(&path)
         }
     };
-
-    let mut cmd = Command::new(&path);
     cmd.args(["--host", "127.0.0.1", "--port", "0"])
         .arg("--ready-file")
         .arg(ready_file)
@@ -1088,13 +1833,14 @@ fn spawn_backend<R: Runtime>(app: &AppHandle<R>, ready_file: &Path) -> Option<Ch
         }
     }
 
+    let label = cmd.get_program().to_string_lossy().to_string();
     match cmd.spawn() {
         Ok(child) => {
-            println!("🚀 后端已启动: {}", path.display());
+            println!("🚀 后端已启动: {label}");
             Some(child)
         }
         Err(e) => {
-            eprintln!("❌ 后端启动失败 {}: {}", path.display(), e);
+            eprintln!("❌ 后端启动失败 {label}: {e}");
             None
         }
     }

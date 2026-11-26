@@ -17,6 +17,7 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from ..config import PROMPT_PRESETS
 from ..paths import get_data_dir
 
 router = APIRouter(prefix="/api/prefs", tags=["用户偏好"])
@@ -24,6 +25,8 @@ router = APIRouter(prefix="/api/prefs", tags=["用户偏好"])
 DEFAULT_PREFS: dict = {
     "nickname": "词札学习者",
     "accent": "us",
+    # 主窗口搜索框的领域提示词：llm / cs / medical / finance，空串 = 用模型卡自己的提示词
+    "translate_preset": "",
     "reminder": {"enabled": False, "time": "20:00", "last_notified": ""},
     # 应用内快捷键：动作 ID -> 组合键（如 "Mod+K"）。
     # 全局快捷键由 Rust 壳持有（shortcuts.json），不在这里，避免启动时依赖后端。
@@ -48,6 +51,7 @@ class ShortcutPrefs(BaseModel):
 class PrefsPayload(BaseModel):
     nickname: str = Field("词札学习者", max_length=16)
     accent: Literal["us", "uk"] = "us"
+    translate_preset: str = Field("", max_length=32)
     reminder: ReminderPrefs = Field(default_factory=ReminderPrefs)
     shortcuts: ShortcutPrefs = Field(default_factory=ShortcutPrefs)
 
@@ -64,6 +68,8 @@ def _merge(raw: dict) -> dict:
         data["nickname"] = raw["nickname"][:16]
     if raw.get("accent") in ("us", "uk"):
         data["accent"] = raw["accent"]
+    if raw.get("translate_preset") in PROMPT_PRESETS:
+        data["translate_preset"] = raw["translate_preset"]
     reminder = raw.get("reminder")
     if isinstance(reminder, dict):
         if isinstance(reminder.get("enabled"), bool):

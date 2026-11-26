@@ -27,3 +27,8 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [target."cfg(unix)".dependencies]
 libc = "0.2.191"
+
+# 截图后用 Apple Vision 做端上 OCR（与 EasyDict 同一套系统能力）
+[target."cfg(target_os = \"macos\")".dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"

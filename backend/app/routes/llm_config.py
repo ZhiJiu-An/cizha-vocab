@@ -210,6 +210,20 @@ def list_models():
     )
 
 
+@router.get("/presets", response_model=list[PresetOut])
+def list_presets():
+    """主窗口搜索框的领域切换器使用：只返回有正文的预设
+
+    custom 没有预设正文（提示词写在模型卡里），由「默认」选项覆盖，
+    这里过滤掉，避免出现一个切换后没有任何变化的选项。
+    """
+    return [
+        PresetOut(**item)
+        for item in config.prompt_presets()
+        if (item.get("prompt") or "").strip()
+    ]
+
+
 @router.post("/models", response_model=SaveResult)
 async def create_model(data: ModelIn):
     return await _save(data, None)

@@ -6,6 +6,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f8f5" />
     <title>词札单词库 · 让每个单词，慢慢生根</title>
+    <style>
+      /* 选区浮层：首帧就必须透明，不能等 JS / CSS 加载完 */
+      html.shot-transparent,
+      html.shot-transparent body,
+      html.shot-transparent #app { background: transparent !important; }
+    </style>
+    <script>
+      // 选区浮层由 Tauri 全屏置顶创建：提前透明，并保证 Esc 总能退出，
+      // 即使前端路由 / 资源加载失败也不会把用户困在全屏窗口里。
+      if (location.pathname === '/shot') {
+        document.documentElement.classList.add('shot-transparent')
+        window.addEventListener('keydown', function (e) {
+          if (e.key !== 'Escape') return
+          e.preventDefault()
+          var tauri = window.__TAURI_INTERNALS__
+          if (tauri && tauri.invoke) tauri.invoke('cancel_region_shot').catch(function () {})
+        })
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

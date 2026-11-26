@@ -51,8 +51,8 @@
     "longDescription": "词札是一款轻量级本地术语记录本，帮助技术从业者快速记录和查询日常遇到的专业词汇。",
     "copyright": "Copyright © 2026 ZhiJiu-An. All rights reserved.",
     "macOS": {
-      "hardenedRuntime": true,
-      "entitlements": "entitlements.plist",
+      "hardenedRuntime": false,
+      "signingIdentity": "-",
       "minimumSystemVersion": "12.0",
       "dmg": {
         "appPosition": { "x": 180, "y": 170 },

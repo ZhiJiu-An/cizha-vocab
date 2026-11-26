@@ -85,6 +85,21 @@ export function nextReviewLabel(iso) {
   return `${date}（${diffDays} 天后）`
 }
 
+/* ========= 通用翻译判定 ========= */
+/** 整句 / 整段：以句末标点结尾，或英文词数 ≥ 6；单词、短语返回 false */
+export function looksLikeSentence(text) {
+  const t = (text || '').trim()
+  if (!t) return false
+  if (/[.!?。！？]$/.test(t)) return true
+  const words = t.split(/\s+/).filter((w) => /[A-Za-z]/.test(w))
+  return words.length >= 6
+}
+
+/** 通用翻译按纯文本渲染；模型偶尔仍带出【译文】标记时剥掉 */
+export function stripTranslationMarker(text) {
+  return (text || '').replace(/^\s*【译文】\s*/, '')
+}
+
 /* ========= 学习提醒投递（v0.11）========= */
 /**
  * 到点提醒怎么送到用户眼前：
